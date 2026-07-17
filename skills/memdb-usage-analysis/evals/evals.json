@@ -1,0 +1,29 @@
+{
+  "skill_name": "memdb-usage-analysis",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I have one Jstp Memdb showtables txt export for a production scenario. Ask me for the data source file path if I forgot to provide it, then filter out tables below 10 MB, validate the table category config, and calculate category totals and per-account averages.",
+      "expected_output": "Prompts for the scenario data source path when missing, runs the bundled analyzer with a single --scenario, produces filtered table CSVs, category summaries, per-account summaries, and a formatted memdb_memory_usage_analysis.xlsx workbook with capacity/customer-count calculation.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I have three memdb exports: baseline, stress, and rollback. Process them together as independent scenarios and give me category summaries. Do not compare the scenarios.",
+      "expected_output": "Runs the analyzer with three --scenario arguments, produces per-scenario category outputs and a formatted Excel workbook, and does not generate memdb_table_diff_pairwise.csv by default.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Use this new showtables export and my existing table_categories.csv. If new tables are not classified, stop and tell me what to add.",
+      "expected_output": "Detects retained tables missing from the category config, writes missing_tables_need_classification.csv, and asks the user to maintain the config before continuing.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Now compare baseline and stress and identify why one scenario's account-class memory per account is much higher than the other.",
+      "expected_output": "Uses --compare-scenarios to generate pairwise table differences, isolates the table with the largest per-account KB contribution, and explains whether the cause is total memory, denominator, or rows per account.",
+      "files": []
+    }
+  ]
+}
