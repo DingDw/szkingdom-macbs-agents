@@ -125,7 +125,7 @@ MACBS_CLEAR_LBM_API(CClearDeal, DoClearBusiness, DoClear)      // 680013 清算�
 
 - memdb manager: 访问内存数据库，内存数据库为进程全局可用。
 - phydb manager: 访问磁盘数据库，磁盘数据库为进程全局可用。
-- cache manager: 访问缓存数据，缓存数据是功能局部有效，其数据来自于 memdb/phydb。业务代码操作缓存数据后，需要回写到memdb/phydb中。
+- cache manager: 访问缓存数据，缓存数据是功能局部有效，其数据来自于 memdb/phydb。业务代码操作缓存数据后，需要回写到memdb/phydb中。CacheManager拥有一个CacheManagerPtr的特化实现，如果某张表在单个功能号的整个生命周期中，都是只读状态，不存在任何的Delete/Update/Insert操作，则优先使用CacheManagerPtr。
 
 
 
