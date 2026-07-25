@@ -173,6 +173,7 @@ cleardate
 market
 stkcode
 costpoint
+sortbusitypeno
 ```
 
 `extfundunit` 的处理：
@@ -237,13 +238,21 @@ IPO缴款:
 
 #### 4.4.5 GenerateDetail 优先级处理
 
+`GenerateDetail` 不在单笔生成时直接确定最终扣收顺序，而是分三步处理：
+
+```text
+1. 同一 fundunit + 原始 costpriority 先做组内排序。
+2. 组内排序结果重写为 m_nSortBusitypeNo = 1..N。
+3. 同一 fundunit 下合并所有原始 costpriority 分组，再做资产单元内组合排序并生成最终 m_nCostpriority。
+```
+
 第一层分组：
 
 ```text
 group by fundunit + 原始 costpriority
 ```
 
-组内调用 handler 的 `DoSort()`。
+组内调用 handler 的三参数 `DoSort(vecRecord, busitype, ipocostorder)`。具体 handler 里保留的单参数 `DoSort(vecRecord)` 不是当前调用签名，不能作为实际排序入口。
 
 常见排序因子：
 
@@ -256,11 +265,39 @@ stkcode
 sortNo
 ```
 
-第二层按资产单元整体排序：
+##### 同优先级组内业务排序
+
+这里的“业务排序模式”按 `busitype` / handler 分支划分，不是 `costmode` 的 `0..7` 扣收金额计算模式。下表只说明同一 `fundunit + 原始 costpriority` 组内的排序规则；组内排序完成后还会进入后面的资产单元组合排序。
+
+| 业务模式 | 覆盖业务类别 | 关键生成字段 | 同优先级组内排序 |
+|---|---|---|---|
+| 默认扣收 | 未命中特殊排序分支的普通扣收业务 | `m_dbTocostamt = unpaidamt`，`m_nGeneratedate = cleardate`，`m_nSortBusitypeNo` 初始取 `node_debtdetail.sortbusitypeno` | `sortBusitypeNo asc` → `generatedate asc` → `fundAmt asc` → `stkcode asc` |
+| 默认冻结 / 行权所得税冻结 | `011908`、`021908`、`011909`、`021909` | `m_dbTofrzamt = unpaidamt`，`m_nGeneratedate` 不额外赋值，`fundAmt` 沿用 `unpaidamt` | 走默认排序；由于 `generatedate` 通常为 `0`，同 `sortBusitypeNo` 下主要按 `fundAmt asc` → `stkcode asc` |
+| 税类 / 财富规划冻结 | `898301`、`899316` | `m_dbTofrzamt = unpaidamt`，`m_nGeneratedate = cleardate`，`m_dbFundAmt = unpaidamt` | 走默认排序：`sortBusitypeNo asc` → `generatedate asc` → `fundAmt asc` → `stkcode asc` |
+| 财富规划扣收 | `898321` | `m_dbTocostamt = unpaidamt`，可能从周期流水子表取 `frzamt` 写入 `m_dbToufzamt`，`m_nSortBusitypeNo = 999` | 走默认排序；同优先级下通常按 `generatedate asc` → `fundAmt asc` → `stkcode asc` |
+| 投顾服务费 / 投顾提佣 | `898317`、`8983T1` 至 `8983T6` | `m_dbTocostamt = unpaidamt`，`m_nGeneratedate = cleardate`，`m_dbFundAmt = unpaidamt` | 走默认排序：`sortBusitypeNo asc` → `generatedate asc` → `fundAmt asc` → `stkcode asc` |
+| IPO 预冻结 | `0120D1`、`0120D2`、`0220D1`、`0220D2` | `m_dbTofrzamt = unpaidamt`，`m_dbFundAmt = unpaidamt`；新股 `m_nSortNo = 500000`，新债 `m_nSortNo = 510000`；配号表存在时用配号价格设置 `m_dbCostunit` | 默认 `ipocostorder=0`：`sortBusitypeNo asc` → `cleardate asc` → `fundAmt asc` → `stkcode asc` → `sortNo asc`。国投 `ipocostorder=1`：`fundAmt asc` → `sortNo asc`，同金额同品种无稳定字段 |
+| IPO 缴款 | `012003`、`012008`、`022003`、`022008` | `m_dbTocostamt = unpaidamt`，可能从 `S72003` 持仓簿记取 `m_dbToufzamt`；配号表存在时 `m_nSortBusitypeNo = payorderno`；新股 `m_nSortNo = 600000`，新债 `m_nSortNo = 610000` | 默认 `ipocostorder=0`：`sortBusitypeNo asc` → `cleardate asc` → `fundAmt asc` → `stkcode asc`。国投 `ipocostorder=1`：`sortNo asc` → `fundAmt asc`，同金额同品种无稳定字段。广发 `ipocostorder=2`：`sortBusitypeNo asc` → `sortNo asc` → `fundAmt asc` → `stkcode desc` |
+| 港股通组合费 | `600103`、`610103` | `m_dbTocostamt = unpaidamt`，`m_nGeneratedate = cleardate`；`SetOrder` 按市场设置 `sortBusitypeNo`：沪港通 `1`、深港通 `2`、其他 `3` | `cleardate asc` → `sortBusitypeNo asc` → `fundAmt asc` |
+| 融资融券负债偿还 | `898207`、`898208`、`898209` | 生成字段走默认扣收 | `cleardate asc` → `debtsno asc` |
+| 融资行权负债偿还 | `011916`、`011915`、`011917`、`011914`、`021916`、`021915`、`021917`、`021914` | 生成字段走默认扣收 | `cleardate asc` → `debtsno asc` |
+| CDR 存托服务费预冻结 | `010309`、`020309` | 当前 CDR handler 只处理业务内部排序号；`010309` 会设为 `98`，`020309` 因条件判断未命中会保留原 `sortbusitypeno`；实际扣收明细排序没有 CDR 专用比较器 | 走默认排序；`632006` 还会通过 `CreateCdrFrzAmtData()` 直接生成 CDR 预冻结交割流水 |
+
+组内排序补充：
 
 ```text
-costpriority asc
-sortBusitypeNo asc
+组内排序器按该组第一条明细的 busitype 分派。
+如果同一 fundunit + 原始 costpriority 下混有多个 busitype，后续明细也会使用第一条明细选出的排序分支。
+排序后原 m_nSortBusitypeNo 不保留，统一重写为该原始优先级组内的 1..N。
+```
+
+##### 资产单元内组合排序
+
+```text
+按 fundunit 合并所有原始 costpriority 分组。
+对同一 fundunit 下的明细执行 SortCostdetail：
+    原始 costpriority asc
+    组内重写后的 m_nSortBusitypeNo asc
 ```
 
 最终重写优先级：
@@ -271,7 +308,15 @@ m_nCostpriority = 原始 costpriority * 1000000 + 资产单元内顺序号
 
 该最终值决定 `632006` 的实际扣收顺序。
 
-#### 4.4.6 GenerateDetail 保存原始待解冻金额快照
+排序与扣收模式的关系：
+
+```text
+costmode 不直接参与一次明细排序。
+costmode 只决定 632006 中 CalFundcostDetail 的扣收/冻结金额计算。
+二次扣收只从 costmode in (1, 2) 的一次明细生成，并继承一次明细最终 m_nCostpriority。
+```
+
+#### 4.4.7 GenerateDetail 保存原始待解冻金额快照
 
 写入明细前：
 
@@ -293,7 +338,7 @@ dbUfzedAmt = ToDouble(m_szRemark)
 
 这里不是直接使用 `m_dbUfzamt`。
 
-#### 4.4.7 GenerateSum 生成 node_fund_cost_sum
+#### 4.4.8 GenerateSum 生成 node_fund_cost_sum
 
 汇总维度：
 
@@ -1028,16 +1073,16 @@ node_fund_cost_sum.m_dbFundnight = dbFundnight
 
 ## 6. 扣收模式索引
 
-| 模式 | 宏 | 含义 |
-|---|---|---|
-| `0` | `COST_MODE_COST_ALL` | 全额扣收，必扣 |
-| `1` | `COST_MODE_COST_MAX` | 有多少扣多少 |
-| `2` | `COST_MODE_COST` | 足额扣收，不足不处理 |
-| `3` | `COST_MODE_COST_FRZ` | 足额扣收，不足有多少冻结多少 |
-| `4` | `COST_MODE_COST_FRZ_MAX` | 有多少扣多少，不足全额冻结 |
-| `5` | `COST_MODE_FRZ_ALL` | 全额冻结 |
-| `6` | `COST_MODE_COST_FRZ_MAX_BLUE` | 有多少扣多少，不足仅蓝补余额 |
-| `7` | `COST_MODE_COST_FRZ_ALL` | 足额扣收，不足全额冻结 |
+| 模式 | 宏 | 含义 | 排序说明 |
+|---|---|---|---|
+| `0` | `COST_MODE_COST_ALL` | 全额扣收，必扣 | 不直接参与排序；按业务类别 handler 生成的最终 `m_nCostpriority` 扣收 |
+| `1` | `COST_MODE_COST_MAX` | 有多少扣多少 | 不直接参与一次排序；一次未扣完或未冻完时生成二次扣收明细，二次明细继承一次最终 `m_nCostpriority` |
+| `2` | `COST_MODE_COST` | 足额扣收，不足不处理 | 不直接参与一次排序；一次未扣完或未冻完时生成二次扣收明细，二次明细继承一次最终 `m_nCostpriority` |
+| `3` | `COST_MODE_COST_FRZ` | 足额扣收，不足有多少冻结多少 | 不直接参与排序；冻结/扣收金额在 `632006` 滚动资金池中计算 |
+| `4` | `COST_MODE_COST_FRZ_MAX` | 有多少扣多少，不足全额冻结 | 不直接参与排序；冻结/扣收金额在 `632006` 滚动资金池中计算 |
+| `5` | `COST_MODE_FRZ_ALL` | 全额冻结 | 不直接参与排序；按业务类别 handler 排序后只产生冻结金额 |
+| `6` | `COST_MODE_COST_FRZ_MAX_BLUE` | 有多少扣多少，不足仅蓝补余额 | 不直接参与排序；蓝补/红冲只影响 `CreateSettdetail` 流水生成 |
+| `7` | `COST_MODE_COST_FRZ_ALL` | 足额扣收，不足全额冻结 | 不直接参与排序；明细过滤时即使未偿还金额很小也允许保留该模式负债 |
 
 ## 7. 推荐阅读顺序
 
