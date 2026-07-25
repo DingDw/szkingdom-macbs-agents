@@ -301,7 +301,7 @@ lbm_pro/macbs/<module>/
 | `cbs_book` | 簿记 | 待补充：`docs/modules/cbs_book/README.md` |
 | `cbs_china_clear_check` | 中登核对 | 待补充：`docs/modules/cbs_china_clear_check/README.md` |
 | `cbs_clear` | 清算 | [`docs/modules/cbs_clear/README.md`](modules/cbs_clear/README.md) |
-| `cbs_clear_match` | 清算配对 | 待补充：`docs/modules/cbs_clear_match/README.md` |
+| `cbs_clear_match` | 清算配对 | [`docs/modules/cbs_clear_match/README.md`](modules/cbs_clear_match/README.md) |
 | `cbs_close` | 收盘 | 待补充：`docs/modules/cbs_close/README.md` |
 | `cbs_data_summary` | 数据汇总 | 待补充：`docs/modules/cbs_data_summary/README.md` |
 | `cbs_day_clear_adapter` | 日间清算适配 | 待补充：`docs/modules/cbs_day_clear_adapter/README.md` |
