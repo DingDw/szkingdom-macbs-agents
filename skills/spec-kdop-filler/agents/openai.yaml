@@ -1,0 +1,4 @@
+interface:
+  display_name: "Spec KDOP Filler"
+  short_description: "Fill KDOP fields from specs and commits"
+  default_prompt: "Use $spec-kdop-filler to fill KDOP requirement fields for a spec change and FS-CBS requirement number."
