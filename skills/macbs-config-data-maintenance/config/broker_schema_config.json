@@ -1,0 +1,22 @@
+{
+  "db_user_prefix": "ddw_config",
+  "broker_suffixes": {
+    "东方财富": "dfcf",
+    "广发证券": "gfzq",
+    "国投证券": "gtzq",
+    "国信证券": "gxzq",
+    "华兴证券": "hxzq",
+    "银河证券": "yhzq",
+    "中金财富": "zjcf",
+    "中信建投": "zxjt"
+  },
+  "non_broker_dirs": [
+    "gauss",
+    "common",
+    "goldendb",
+    "oceanbase",
+    "金证股份",
+    "日间清算适配",
+    "国投poc"
+  ]
+}
