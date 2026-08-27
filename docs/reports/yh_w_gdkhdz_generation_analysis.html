@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>银河证券 w 版柜台 股东客户对照生成 SQL 分析</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --primary: #1a5fb4;
+    --border: #d8dee4;
+    --bg-soft: #f6f8fa;
+    --code-bg: #f0f1f3;
+    --text: #24292f;
+    --warn-bg: #fff8e1;
+    --warn-border: #f5c518;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    color: var(--text);
+    margin: 0;
+    padding: 24px 16px;
+    background: #fbfcfd;
+    line-height: 1.7;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { color: var(--primary); border-bottom: 3px solid var(--primary); padding-bottom: 10px; font-size: 26px; }
+  h2 {
+    color: var(--primary); margin-top: 40px; font-size: 20px;
+    border-left: 5px solid var(--primary); padding-left: 10px;
+    background: linear-gradient(90deg, rgba(26,95,180,0.08), transparent);
+  }
+  h3 { font-size: 16px; margin-top: 24px; color: #14508c; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; background: #fff; }
+  th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #eaf1f9; color: #143d66; font-weight: 600; white-space: nowrap; }
+  tr:nth-child(even) td { background: var(--bg-soft); }
+  code {
+    background: var(--code-bg); padding: 1px 5px; border-radius: 4px;
+    font-family: Consolas, "Courier New", monospace; font-size: 13px;
+  }
+  pre {
+    background: #1f2430; color: #d5d8e2; padding: 14px 16px; border-radius: 8px;
+    overflow-x: auto; font-size: 12.5px; line-height: 1.55;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  .card {
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; margin: 16px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .pill {
+    display: inline-block; background: #eaf1f9; color: #14508c;
+    border-radius: 12px; padding: 1px 10px; font-size: 12px; margin-right: 6px;
+  }
+  .tag-blue   { background: #e2f0ff; color: #0b5cab; }
+  .tag-green  { background: #e6f6ec; color: #177245; }
+  .tag-orange { background: #fff2e0; color: #9c5a00; }
+  .tag-purple { background: #f0eaff; color: #6a3db8; }
+  .warn {
+    background: var(--warn-bg); border: 1px solid var(--warn-border);
+    border-radius: 8px; padding: 10px 14px; font-size: 14px; margin: 14px 0;
+  }
+  .field-table td:first-child { font-weight: 600; color: #14508c; white-space: nowrap; }
+  .small { font-size: 12px; color: #57606a; }
+  .mermaid { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin: 14px 0; text-align: center; }
+  footer { margin-top: 48px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px; color: #57606a; }
+  ul { padding-left: 22px; }
+  li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>银河证券 w 版柜台 — 股东客户对照生成 SQL 分析</h1>
+<p>
+  <span class="pill tag-blue">类型：单条导出 SQL（MSSQL / run 库）</span>
+  <span class="pill tag-green">输出格式：新意股东客户对照（XY_GDKHDZ）</span>
+  <span class="pill tag-orange">共 6 个 SELECT 段（5 个 UNION ALL）</span>
+  <span class="pill tag-purple">文件：银河证券w版股东客户对照生成.sql</span>
+</p>
+<p>
+  该脚本在<b>银河证券 w 版柜台（run 库）</b>中直接以 SQL 方式生成股东客户对照数据，输出列
+  <code>JYPZ / GDZH / ZDXW / JGDM / YYBDM / ZJZH / YHDM / CGFS / ZHZT / JYZH</code>，
+  与 MACBS 侧 <code>node_gdkhdz</code> 表（新意 XY_GDKHDZ 导出格式）的 10 个业务列<b>完全对应</b>，
+  是柜台侧直接出数、替代服务端生成的方案。其核心基于大集中柜台的
+  <code>secuid / fundinfo / banktranid / dictvalue / orgidset / oftaaccinfo / oftaacc / ofta / rptselfrunsecuid</code>
+  九张表，按股东与基金两条主线、四个业务分支输出对照记录。
+</p>
+
+<h2>一、SQL 总体结构</h2>
+<div class="card">
+<div class="mermaid">
+flowchart TD
+    A["输出 10 列<br/>JYPZ GDZH ZDXW JGDM YYBDM<br/>ZJZH YHDM CGFS ZHZT JYZH"] --> B["UNION ALL 结构（6 段）"]
+    B --> B1["段1 · 非京A 股东（含 S 类/B 股/基金J）<br/>secuid join fundinfo left join banktranid"]
+    B --> B2["段2 · 京A 股东（market=B）<br/>排除股转A 双挂"]
+    B --> B3["段3 · 基金 TA 账号 · 有三方存管<br/>oftaaccinfo 等五表关联"]
+    B --> B4["段4 · 基金 TA 账号 · 无三方存管"]
+    B --> B5["段5 · 非 S 类资金兜底<br/>market 0/1/6（A股）"]
+    B --> B6["段6 · 非 S 类资金兜底<br/>market B（京A）"]
+    B1 --> C1["共同字典/映射<br/>dictvalue Fsftoxy 银行转换<br/>orgidset 营业部反查"]
+    B3 --> C1
+    B4 --> C1
+    B1 --> D1["输出侧字段<br/>JYPZ 市场case映射<br/>ZHZT 状态case映射<br/>YHDM 银行case映射"]
+    B2 --> D1
+    B3 --> D2["基金字段规则<br/>GDZH=TA账号/生成规则<br/>JYZH=交易账号"]
+    B4 --> D2
+</div>
+<p class="small">图 1：SQL 整体构成。段 1/2 与段 5/6 在客户类型上互补（S 类特殊资金 vs 非 S 类资金），段 3/4 为基金 TA 账号分支（有/无三方存管）。</p>
+</div>
+
+<h2>二、处理流程图</h2>
+<div class="card">
+<h3>2.1 股东类记录分流（段1/2/5/6）</h3>
+<div class="mermaid">
+flowchart TD
+    A["secuid 股东账户<br/>status <> '*' 有效"] --> B["排除自运行股东<br/>rptselfrunsecuid bsflag in (1N,1O)"]
+    B --> C["关联 fundinfo custid<br/>fundtype in ('', A, B)"]
+    C --> D{"证券类别分流"}
+    D -->|"京A market=B"| E{"存在同键股转A<br/>secuid e.market='6'?"}
+    E -->|"是（股转A 优先）"| X[不输出]
+    E -->|"否"| F["段2/段6 输出<br/>段6 追加排除S类客户"]
+    D -->|"A股类市场 0/1/5/6/S"| G{"资金 specialkind 含 S?"}
+    G -->|"是（S 类特殊资金）"| H["段1 输出<br/>YHDM 按 Fsftoxy 转换<br/>CGFS=2"]
+    G -->|"否（普通资金）"| I{"市场为 0/1/6/B?"}
+    I -->|"是"| J["段5/6 兜底输出<br/>YHDM=9998 CGFS=0"]
+    I -->|"否（5沪港通/S深港通）"| X2[不输出]
+    D -->|"B股类 2/3/7 及基金 J"| K["段1 输出<br/>YHDM=9998 CGFS=0<br/>J 市场 JYPZ=KFJJ"]
+</div>
+<p class="small">图 2：股东类记录的分流决策树（段 1/2 与段 5/6 由 specialkind 是否含 S 互补）。</p>
+
+<h3>2.2 基金 TA 账号分流（段3/4）</h3>
+<div class="mermaid">
+flowchart TD
+    A["oftaaccinfo TA账号"] --> B["关联 oftaacc 资金账号<br/>fundid+orgid+transacc+tacode"]
+    B --> C["校验 ofta TA 类型 tacode"]
+    C --> D{"该 orgid+fundid 是否存在<br/>有效三方存管 banktranid?"}
+    D -->|"存在"| E["段3 输出<br/>CGFS=2 YHDM=Fsftoxy 转换"]
+    D -->|"不存在"| F["段4 输出<br/>CGFS=0 YHDM=9998"]
+    E --> G["TA 账号生成规则<br/>taacc 为空 → T+tacode(2)+orgid(4)+fundid(5)<br/>taacc 非空 → 直接使用"]
+    F --> G
+</div>
+<p class="small">图 3：基金 TA 账号处理流程。两段输出列一致，仅 YHDM/CGFS/状态来源不同。</p>
+</div>
+
+<h2>三、各分支详细说明</h2>
+<div class="card">
+<h3>3.1 分支总览</h3>
+<table>
+  <tr><th>段</th><th>来源表</th><th>业务定位</th><th>YHDM / CGFS</th><th>JYZH</th></tr>
+  <tr>
+    <td><b>段1</b></td>
+    <td>secuid a join fundinfo b<br/>left join banktranid c</td>
+    <td>非京A 股东：S 类特殊资金（A股类市场）、B股类全部、基金 J 市场</td>
+    <td>A股类市场且有银行 → Fsftoxy 转换 / 否则 9998<br/>CGFS：A股类→2，B股/基金→0</td>
+    <td><code>' '</code></td>
+  </tr>
+  <tr>
+    <td><b>段2</b></td>
+    <td>secuid a join fundinfo b<br/>left join banktranid c</td>
+    <td>京A 股东（market=B），排除与股转A 同键双挂；市场集合扩大到 0156BS（含京A）</td>
+    <td>同段1（京A 属 A股类市场，CGFS=2）</td>
+    <td><code>' '</code></td>
+  </tr>
+  <tr>
+    <td><b>段3</b></td>
+    <td>oftaaccinfo c 等五表<br/>含 banktranid f</td>
+    <td>基金 TA 账号（含三方存管银行关系）</td>
+    <td>有 bankcode → Fsftoxy 转换 / 否则 9998<br/>CGFS=<code>'2'</code></td>
+    <td><code>d.transacc</code></td>
+  </tr>
+  <tr>
+    <td><b>段4</b></td>
+    <td>oftaaccinfo c 等四表<br/>无 banktranid</td>
+    <td>基金 TA 账号（无三方存管银行关系）</td>
+    <td>固定 <code>'9998'</code> / CGFS=<code>'0'</code></td>
+    <td><code>d.transacc</code></td>
+  </tr>
+  <tr>
+    <td><b>段5</b></td>
+    <td>secuid h join fundinfo i</td>
+    <td>非 S 类资金客户的 A 股股东兜底（0/1/6），不带银行</td>
+    <td>固定 <code>'9998'</code> / CGFS=<code>'0'</code></td>
+    <td><code>' '</code></td>
+  </tr>
+  <tr>
+    <td><b>段6</b></td>
+    <td>secuid h join fundinfo i</td>
+    <td>非 S 类资金客户的京A 股东兜底（B），排除股转A 双挂</td>
+    <td>固定 <code>'9998'</code> / CGFS=<code>'0'</code></td>
+    <td><code>' '</code></td>
+  </tr>
+</table>
+
+<h3>3.2 段1 / 段2 过滤条件（股东主线）</h3>
+<table>
+  <tr><th>条件</th><th>含义</th></tr>
+  <tr><td><code>a.status &lt;&gt; '*'</code> 且 <code>b.status &lt;&gt; '*'</code></td><td>股东账户与资金账户均有效（'*' = 销户）</td></tr>
+  <tr><td>段1：<code>a.market &lt;&gt; 'B'</code>；段2：<code>a.market = 'B'</code></td><td>段1 排除京A，段2 只取京A，两段互补不重叠</td></tr>
+  <tr><td><code>a.market &lt;&gt; '1' OR ('1'='1')</code></td><td>沪A 指定交易开关（<code>'1'='1'</code> 恒真 → 当前<b>沪A 全部输出</b>，regflag 条件被置为恒通过，保留开关位）</td></tr>
+  <tr><td><code>NOT EXISTS rptselfrunsecuid<br/>(selfrunsecuid=a.secuid OR secuid=a.secuid)<br/>AND market=a.market AND bsflag IN ('1N','1O')</code></td><td>排除<b>自运行股东</b>（自行交收、不参与统一清算的证券账户，按股东代码+市场匹配）</td></tr>
+  <tr><td><code>b.fundtype = '' OR CHARINDEX(b.fundtype,'AB') &gt; 0</code></td><td>资金类型仅取 <b>A / B / 空</b> 类（排除信用等其他类型资金）</td></tr>
+  <tr><td><code>CHARINDEX(a.market,'0156S')&gt;0 AND CHARINDEX('S',b.specialkind)&gt;0<br/>OR CHARINDEX(a.market,'0156S')=0</code></td><td>等价于 <code>market 不在 (0,1,5,6,S) OR specialkind 含 S</code>：<br/>① A股类市场（0/1/5/6/S）的股东<b>必须匹配 S 类特殊资金</b>才输出；<br/>② B股类及其他市场不过滤（无论是否 S 类）。<br/><b>被过滤的"非 S 类资金 + A股"由段5/6 兜底输出</b>（YHDM=9998、CGFS=0）</td></tr>
+  <tr><td>段2 附加：<code>NOT EXISTS secuid e<br/>serverid/orgid/secuid 相同 AND e.market='6'</code></td><td>排除<b>京A 与股转A 双挂</b>的京A 记录（同键存在股转A 时京A 不输出，由段1 输出股转A，避免重复）</td></tr>
+  <tr><td>LEFT JOIN banktranid 条件：<br/><code>orgid+fundid 匹配、status&lt;&gt;'*'、moneytype='0'</code><br/><code>AND EXISTS dictvalue dictitem='Fsftoxy' 且 subitem=bankcode</code></td><td>仅关联<b>人民币三方存管</b>且<b>银行代码可转换</b>（存在于 Fsftoxy 字典）的银行关系；未命中则 bankcode 为空</td></tr>
+</table>
+
+<h3>3.3 段3 / 段4 过滤条件（基金主线）</h3>
+<table>
+  <tr><th>条件</th><th>含义</th></tr>
+  <tr><td><code>c.fundid=d.fundid AND c.orgid=d.orgid<br/>AND c.transacc=d.transacc AND c.tacode=d.tacode</code></td><td>TA 账号信息（oftaaccinfo）与基金资金账号（oftaacc）按 资金账号+营业部+交易账号+TA代码 关联</td></tr>
+  <tr><td><code>c.tacode = e.tacode</code></td><td>TA 代码必须在 TA 类型表（ofta）中存在（筛选允许的 TA 形态）</td></tr>
+  <tr><td>段3：<code>c.fundid=f.fundid（banktranid）<br/>AND f.moneytype='0' AND f.status&lt;&gt;'*'</code></td><td>该资金账号存在<b>有效人民币三方存管</b>记录（inner 语义，隐含 has-bank）</td></tr>
+  <tr><td>段4：<code>c.fundid NOT IN (SELECT fundid FROM banktranid<br/>WHERE orgid=c.orgid AND status&lt;&gt;'*')</code></td><td>该资金账号在该营业部<b>无任何有效三方存管</b>记录</td></tr>
+  <tr><td><code>g.status &lt;&gt; '*'</code>（fundinfo）</td><td>资金账户有效；段4 还用 g 的 status/opendate 判断账户状态</td></tr>
+  <tr><td>段4 附加：<code>ISNULL(TA账号生成值,'') &lt;&gt; ''</code></td><td>生成后的 GDZH（TA 账号）非空才输出</td></tr>
+</table>
+</div>
+
+<h2>四、逐字段赋值逻辑</h2>
+<div class="card">
+<p>输出 10 列，无主键约束、无更新时间列（相比之下 MACBS <code>node_gdkhdz</code> 另有主键 6 字段与 updatetime）。</p>
+
+<table class="field-table">
+  <tr>
+    <th>字段</th>
+    <th style="width:250px">股东分支（段1/2/5/6）</th>
+    <th style="width:250px">基金分支（段3/4）</th>
+  </tr>
+  <tr>
+    <td><b>JYPZ</b><br/>交易品种</td>
+    <td>按市场 case 硬编码映射：<br/>0→SAGF（深A）、1→HAGF（沪A）、2→SBGF（深B）、3→HBGF（沪B）、6/B→NQAG（股转A/京A）、7→NQBG（股转B）、J→KFJJ（基金）、5→SHHK（沪港通）、S→SZHK（深港通）、其他→' '。<br/><span class="small">注意：段5/6 的 case 无 5/S 分支（该两段仅 0/1/6/B 市场）。</span></td>
+    <td>固定 <code>'KFJJ'</code>（开放式基金）。</td>
+  </tr>
+  <tr>
+    <td><b>GDZH</b><br/>股东/TA账号</td>
+    <td><code>m.secuid</code> / <code>p.secuid</code>（股东代码直取）。</td>
+    <td>TA 账号生成规则：<br/><code>taacc 为空</code> → <code>'T' + tacode右2位 + orgid右4位 + fundid右5位</code>（各段左补 0 后截右）；<br/><code>taacc 非空</code> → 直接用 <code>taacc</code>；<br/>整体为 NULL → <code>''</code>。</td>
+  </tr>
+  <tr>
+    <td><b>ZDXW</b><br/>席位代码</td>
+    <td colspan="2">固定空白字面量（源 SQL 中为跨行书写的空白串，无实际席位信息）。</td>
+  </tr>
+  <tr>
+    <td><b>JGDM</b><br/>机构代码</td>
+    <td colspan="2">固定 <code>' '</code>（空格）。</td>
+  </tr>
+  <tr>
+    <td><b>YYBDM</b><br/>营业部编码</td>
+    <td colspan="2">
+      通过 <code>orgidset</code> 按 <code>brhid = 股东/TA营业部 orgid</code> 反查<b>标准营业部编码 orgid</b>
+      （<code>SELECT TOP 1 orgid FROM orgidset WHERE brhid = m.orgid</code>）；
+      反查不到 → 使用原 orgid。<br/>
+      <span class="small">说明：w 版柜台内部营业部号（brhid 维度）与对外营业部编码（orgid）可能不同，通过 orgidset 归一。</span>
+    </td>
+  </tr>
+  <tr>
+    <td><b>ZJZH</b><br/>券商资金账户</td>
+    <td colspan="2"><code>RIGHT('000000000000' + CONVERT(varchar(20), fundid), 12)</code> —— 资金账号 fundid<b>左补 0 至 12 位</b>（统一长度，与新意定长格式一致）。</td>
+  </tr>
+  <tr>
+    <td><b>YHDM</b><br/>存管银行</td>
+    <td>
+      <b>A股类市场</b>（market 属于 0156BS 即 0/1/5/6/B/S）<b>且 bankcode 非空</b>：<br/>
+      → <code>dictvalue</code> 按 <code>dictitem='Fsftoxy' AND subitem=bankcode</code> 取 <code>subitemname</code>（柜台银行代码 → 新意银行代码）；<br/>
+      <b>其余</b>（B股类 2/3/7、基金 J、或 A股类无银行）→ <code>'9998'</code>。
+    </td>
+    <td>
+      段3：bankcode 非空 → Fsftoxy 字典转换；否则 <code>'9998'</code>；<br/>
+      段4：固定 <code>'9998'</code>。
+    </td>
+  </tr>
+  <tr>
+    <td><b>CGFS</b><br/>存管方式</td>
+    <td>按市场组判断：<br/><code>market 属于 0156BS</code>（0/1/5/6/B/S）→ <code>'2'</code>（三方存管）；<br/>其余（2/3/7/J）→ <code>'0'</code>（非三方存管）。<br/><span class="small">注意：A股类即使 bankcode 未命中也输出 2——该字段按市场口径而非实际银行关系。</span></td>
+    <td>段3：固定 <code>'2'</code>；<br/>段4：固定 <code>'0'</code>（严格按是否实际存在三方存管）。</td>
+  </tr>
+  <tr>
+    <td><b>ZHZT</b><br/>账号状态</td>
+    <td>股东状态（secuid.status）：<br/><code>status='*'</code> → <code>'3'</code>（销户，防御分支，实际已被 where 过滤）；<br/><code>status&lt;&gt;'*' 且 opendate=当日</code> → <code>'2'</code>（新开户）；<br/>其他 → <code>'1'</code>（正常）。</td>
+    <td>
+      段3：取 oftaacc.status —— <code>IN ('6','7','e')</code> → <code>'3'</code>（销户）；当日开户 → <code>'2'</code>；否则 <code>'1'</code>；<br/>
+      段4：取 fundinfo.status —— <code>'*'</code> → <code>'3'</code>（防御）；当日开户 → <code>'2'</code>；否则 <code>'1'</code>。
+    </td>
+  </tr>
+  <tr>
+    <td><b>JYZH</b><br/>交易账号</td>
+    <td>固定 <code>' '</code>（股东记录不输出交易账号）。</td>
+    <td><code>d.transacc</code> —— 输出<b>基金交易账号</b>（与段3/4 的 TA 记录一一对应）。</td>
+  </tr>
+</table>
+</div>
+
+<h2>五、编码映射汇总</h2>
+<div class="card">
+<h3>5.1 市场 → JYPZ（交易品种）</h3>
+<table>
+  <tr><th>market</th><th>含义</th><th>JYPZ</th><th>银行组（YHDM/CGFS 判定）</th></tr>
+  <tr><td>0</td><td>深A</td><td><b>SAGF</b></td><td rowspan="6">A股类（0156BS）<br/>CGFS=2、YHDM 可有转换</td></tr>
+  <tr><td>1</td><td>沪A</td><td><b>HAGF</b></td></tr>
+  <tr><td>5</td><td>沪港通</td><td><b>SHHK</b></td></tr>
+  <tr><td>6</td><td>股转A</td><td><b>NQAG</b></td></tr>
+  <tr><td>B</td><td>京A</td><td><b>NQAG</b></td></tr>
+  <tr><td>S</td><td>深港通</td><td><b>SZHK</b></td></tr>
+  <tr><td>2</td><td>深B</td><td><b>SBGF</b></td><td rowspan="3">B股类<br/>CGFS=0、YHDM=9998</td></tr>
+  <tr><td>3</td><td>沪B</td><td><b>HBGF</b></td></tr>
+  <tr><td>7</td><td>股转B</td><td><b>NQBG</b></td></tr>
+  <tr><td>J</td><td>基金</td><td><b>KFJJ</b></td><td>CGFS=0、YHDM=9998</td></tr>
+  <tr><td>其他</td><td>-</td><td><code>' '</code></td><td>-</td></tr>
+</table>
+
+<h3>5.2 状态 → ZHZT</h3>
+<table>
+  <tr><th>输入状态</th><th>来源表</th><th>ZHZT</th><th>含义</th></tr>
+  <tr><td><code>'*'</code></td><td>secuid.status</td><td><b>3</b></td><td>销户（股东主线，仅防御性，实际已过滤）</td></tr>
+  <tr><td><code>'6','7','e'</code></td><td>oftaacc.status</td><td><b>3</b></td><td>销户（基金 TA 主线）</td></tr>
+  <tr><td><code>'*'</code></td><td>fundinfo.status</td><td><b>3</b></td><td>销户（无银行基金，防御分支）</td></tr>
+  <tr><td>任何有效状态 + <code>opendate = 当日</code></td><td>secuid / oftaaccinfo / fundinfo 的 opendate</td><td><b>2</b></td><td>新开户</td></tr>
+  <tr><td>其他</td><td>-</td><td><b>1</b></td><td>正常</td></tr>
+</table>
+<p class="small">当日 = 生成脚本当天的业务日期（脚本中硬编码为 <code>20260209</code>，随每次生成替换为当日）。</p>
+
+<h3>5.3 银行代码转换（Fsftoxy 字典）</h3>
+<p>
+  柜台三方存管银行代码 → 新意银行代码，统一走 <code>dictvalue</code> 字典：
+  <code>dictitem='Fsftoxy'</code>，<code>subitem=柜台bankcode</code>，取 <code>subitemname</code> 作为输出 YHDM。
+  转换失败（无字典记录）时 join 不命中，等价于"无银行"，输出 <code>9998</code>。
+</p>
+<div class="warn">⚠️ 与 MACBS 的差异：MACBS 无银行时输出 <code>9999</code> 或空格，且允许通过 cgfs 配置过滤非三方存管记录；w 版无银行统一输出 <code>9998</code>，不提供过滤能力。</div>
+</div>
+
+<h2>六、关键业务规则要点</h2>
+<div class="card">
+<ul>
+  <li><b>S 类资金分流（段1/2 ↔ 段5/6 互补）</b>：A股类市场（0/1/5/6/S）的股东要求资金账户 <code>specialkind</code> 含 <code>'S'</code>（特殊资金）才在段1/2 输出并<b>携带三方存管银行关系</b>；非 S 类资金的 A股 股东（0/1/6/B）由段5/6 兜底输出，<b>不带银行</b>（YHDM=9998、CGFS=0）。B股类（2/3/7）及基金 J 股东不受 S 类限制，均走段1。</li>
+  <li><b>京A/股转A 双挂排除</b>：同一 serverid+orgid+secuid 同时存在 market='6'（股转A）与 market='B'（京A）时，<b>股转A 优先输出、京A 被排除</b>（段2/段6 均带此排除条件），避免同一股东代码对照重复。</li>
+  <li><b>自运行股东排除</b>：凡在 <code>rptselfrunsecuid</code> 中（selfrunsecuid 或 secuid 匹配 + market 匹配）且 <code>bsflag IN ('1N','1O')</code> 的股东全部不输出——该类属自运行交收（不参与统一清算结算）。</li>
+  <li><b>沪港通/深港通（5/S）只随 S 类资金输出</b>：非 S 类资金的沪港通/深港通股东既不在段1（被 specialkind 条件过滤）也不在段5（市场范围仅 0/1/6/B），最终不输出。</li>
+  <li><b>沪A 指定交易开关恒真</b>：<code>a.regflag &lt;&gt; '0' OR '1'='1'</code> 中 <code>'1'='1'</code> 恒真，当前沪A 股东<b>全部输出</b>；该写法保留"仅输出指定交易股东"的开关位（改为 <code>'1'='0'</code> 即启用 regflag 过滤）。</li>
+  <li><b>资金类型限定</b>：仅 <code>fundtype in ('', 'A', 'B')</code> 的资金账户参与；其他类型（如信用类）不生成对照。</li>
+  <li><b>市场↔S类资金匹配</b>：段5/6 额外按<b>客户维度</b>排除（<code>custid NOT IN 含S类资金的客户</code>），与段1/2 的按资金维度判断殊途同归，确保同一记录不跨段重复输出。</li>
+  <li><b>银行关系限定人民币三方存管</b>：banktranid 只取 <code>moneytype='0'</code>（人民币）且 <code>status&lt;&gt;'*'</code>，外币银行不参与 YHDM 输出（B股 固定 9998）。</li>
+  <li><b>基金 TA 无银行兜底</b>：段4 输出"无三方存管"的基金 TA 记录（GDZH 生成值非空），保证基金客户对照不遗漏。</li>
+</ul>
+</div>
+
+<h2>七、与 MACBS node_gdkhdz 生成逻辑对比</h2>
+<div class="card">
+<table>
+  <tr><th style="width:130px">维度</th><th>银河 w 版柜台 SQL</th><th>MACBS（GdkhdzHandler/GdkhdzTask）</th></tr>
+  <tr><td>实现方式</td><td>单条 MSSQL（run 库），数据库执行</td><td>Java 程序 + 配置驱动，多线程分批</td></tr>
+  <tr><td>数据源</td><td>secuid / fundinfo / banktranid / dictvalue / orgidset / oftaaccinfo / oftaacc / ofta / rptselfrunsecuid</td><td>node_secuid / node_fundacct_bank / node_fundacct</td></tr>
+  <tr><td>JYPZ</td><td>内置 case 硬编码（SAGF/HAGF/SBGF/HBGF/NQAG/NQBG/KFJJ/SHHK/SZHK），无 H 股全流通（HCHK/HCGF）</td><td>comm_xyexport_mapped 配置表驱动，新增 HCHK/HCGF（H股全流通多币种拆分）</td></tr>
+  <tr><td>ZDXW</td><td>固定空白</td><td>参数 67057 取真实席位（trdseat/mainseat）</td></tr>
+  <tr><td>YYBDM</td><td>orgidset 反查标准营业部，不补零</td><td>orgid 直取（资金优先），左补 0 至 4 位（@ 配置例外）</td></tr>
+  <tr><td>ZJZH</td><td>fundid 左补 0 至 12 位</td><td>fundacct 直取</td></tr>
+  <tr><td>YHDM</td><td>Fsftoxy 字典转换，无银行 → 9998；B股/A股无银行均 9998</td><td>配置表转换 + 默认外币行覆盖 + 另库虚拟银行（67077-67079）；无银行 → 9999/空格；另有深B沪B 默认行、按营业部重写 0200/1800 规则</td></tr>
+  <tr><td>CGFS</td><td>按市场组（A股类 2 / 其他 0）；基金按有无银行（2/0）</td><td>按实际银行关系三分支（2/0），配置可过滤非三方存管记录</td></tr>
+  <tr><td>ZHZT</td><td>内置 case（1/2/3：正常/新开/销户）</td><td>gdkhzt 配置表转换（1/2/3/4/8 含锁定/异常，today_open 当日开户）</td></tr>
+  <tr><td>JYZH</td><td>股东固定空格；基金输出交易账号 transacc</td><td>固定空格（借用 open_date 判断当日开户后清空），无基金 TA 分支</td></tr>
+  <tr><td>基金覆盖</td><td>基金 TA 独立双分支（有/无银行），GDZH 按 TA 规则生成</td><td>仅 secuid J 市场转 KFJJ，无独立 TA 数据源</td></tr>
+  <tr><td>时效/状态</td><td>无时间戳列；状态按当前库值</td><td>updatetime 当前时间；主键 6 字段 + 去重</td></tr>
+  <tr><td>扩展性</td><td>规则硬编码（市场映射/状态映射/日期当日），需改 SQL</td><td>全部规则走配置表/系统参数，改配置即可</td></tr>
+</table>
+</div>
+
+<h2>八、涉及源表清单</h2>
+<div class="card">
+<table>
+  <tr><th>表名（run.dbo）</th><th>用途</th><th>关键字段</th></tr>
+  <tr><td><code>secuid</code></td><td>股东账户主表（段1/2/5/6 数据源）</td><td>serverid, orgid, custid, market, secuid, status, opendate, regflag</td></tr>
+  <tr><td><code>fundinfo</code></td><td>资金账户（custid 关联，提供 fundid/fundname/状态）</td><td>orgid, fundid, custid, fundname, status, opendate, fundtype, specialkind</td></tr>
+  <tr><td><code>banktranid</code></td><td>三方存管银行关系（左连/内连）</td><td>orgid, fundid, bankcode, moneytype, status</td></tr>
+  <tr><td><code>dictvalue</code></td><td>字典：Fsftoxy 银行代码 → 新意银行代码</td><td>dictitem, subitem, subitemname</td></tr>
+  <tr><td><code>orgidset</code></td><td>营业部映射：brhid → 标准 orgid</td><td>brhid, orgid</td></tr>
+  <tr><td><code>oftaaccinfo</code></td><td>基金 TA 账号信息（段3/4 主表）</td><td>orgid, fundid, transacc, tacode, taacc, opendate</td></tr>
+  <tr><td><code>oftaacc</code></td><td>基金资金账号（提供交易账号与状态）</td><td>orgid, fundid, transacc, tacode, status</td></tr>
+  <tr><td><code>ofta</code></td><td>TA 类型（tacode 合法性过滤）</td><td>tacode</td></tr>
+  <tr><td><code>rptselfrunsecuid</code></td><td>自运行股东排除表</td><td>selfrunsecuid, secuid, market, bsflag</td></tr>
+</table>
+</div>
+
+<h2>九、完整 SQL（整理后）</h2>
+<div class="card">
+<pre><code>-- ============ 段1：非京A 股东（S类/B股/基金J 市场） ============
+SELECT
+  JYPZ = CASE
+    WHEN ISNULL(m.market,'')='0'  THEN 'SAGF'   -- 深A
+    WHEN ISNULL(m.market,'')='1'  THEN 'HAGF'   -- 沪A
+    WHEN ISNULL(m.market,'')='2'  THEN 'SBGF'   -- 深B
+    WHEN ISNULL(m.market,'')='3'  THEN 'HBGF'   -- 沪B
+    WHEN ISNULL(m.market,'') IN ('6','B') THEN 'NQAG' -- 股转A/京A
+    WHEN ISNULL(m.market,'')='7'  THEN 'NQBG'   -- 股转B
+    WHEN ISNULL(m.market,'')='J'  THEN 'KFJJ'   -- 基金
+    WHEN ISNULL(m.market,'')='5'  THEN 'SHHK'   -- 沪港通
+    WHEN ISNULL(m.market,'')='S'  THEN 'SZHK'   -- 深港通
+    ELSE ' ' END,
+  GDZH = m.secuid, ZDXW = ' ', JGDM = ' ',
+  YYBDM = ISNULL((SELECT TOP 1 orgid FROM run.dbo.orgidset WHERE brhid = m.orgid), m.orgid),
+  ZJZH = RIGHT('000000000000' + CONVERT(varchar(20), m.fundid), 12),
+  YHDM = CASE
+    WHEN CHARINDEX(m.market,'0156BS')&gt;0 AND ISNULL(m.bankcode,'')&lt;&gt;'' THEN
+      (SELECT TOP 1 subitemname FROM run.dbo.dictvalue WHERE subitem = m.bankcode AND dictitem = 'Fsftoxy')
+    ELSE '9998' END,
+  CGFS = (CASE WHEN CHARINDEX(m.market,'0156BS')&gt;0 THEN '2' ELSE '0' END),
+  ZHZT = CASE WHEN m.status='*' THEN '3'
+              WHEN m.status&lt;&gt;'*' AND m.opendate = 20260209 THEN '2'
+              ELSE '1' END,
+  JYZH = ' '
+FROM (
+  SELECT DISTINCT a.*, b.fundname, b.fundid,
+         bankcode = ISNULL(c.bankcode,'')
+  FROM run.dbo.secuid a
+  INNER JOIN run.dbo.fundinfo b ON a.custid = b.custid
+  LEFT  JOIN run.dbo.banktranid c
+         ON b.orgid = c.orgid AND b.fundid = c.fundid
+        AND c.status &lt;&gt; '*' AND c.moneytype = '0'
+        AND EXISTS (SELECT subitemname FROM run.dbo.dictvalue
+                    WHERE dictitem='Fsftoxy' AND subitem=c.bankcode)
+  WHERE a.status &lt;&gt; '*' AND b.status &lt;&gt; '*'
+    AND a.market &lt;&gt; 'B'
+    AND (a.market &lt;&gt; '1' OR (a.market='1' AND (a.regflag&lt;&gt;'0' OR '1'='1')))  -- 沪A开关恒真
+    AND NOT EXISTS (SELECT TOP 1 selfrunsecuid FROM run.dbo.rptselfrunsecuid
+                    WHERE (selfrunsecuid=a.secuid OR secuid=a.secuid)
+                      AND market=a.market AND bsflag IN ('1N','1O'))
+    AND (b.fundtype='' OR CHARINDEX(b.fundtype,'AB')&gt;0)
+    AND ((CHARINDEX(a.market,'0156S')&gt;0 AND CHARINDEX('S',b.specialkind)&gt;0)
+      OR (CHARINDEX(a.market,'0156S')=0))  -- S类资金仅限A股类市场
+UNION ALL
+  -- 段2：京A 段（market=B）：排除股转A 双挂，市场组扩展为 '0156BS'
+  SELECT ... -- 同段1 输出列，where 改为 a.market='B'，
+              -- 并加 NOT EXISTS(secuid e 同键且 e.market='6')
+) m
+
+UNION ALL
+-- ============ 段3：基金 TA 账号 · 有三方存管 ============
+SELECT DISTINCT JYPZ='KFJJ',
+  GDZH = ISNULL(CASE c.taacc WHEN '' THEN
+           'T'+RIGHT('00'+CONVERT(varchar(2),c.tacode),2)
+             +RIGHT('0000'+CONVERT(varchar(8),c.orgid),4)
+             +RIGHT('00000'+CONVERT(varchar(12),c.fundid),5)
+           ELSE c.taacc END,''),
+  ZDXW=' ', JGDM=' ',
+  YYBDM = ISNULL((SELECT TOP 1 orgid FROM run.dbo.orgidset WHERE brhid=c.orgid), c.orgid),
+  ZJZH = RIGHT('000000000000'+CONVERT(varchar(20),c.fundid),12),
+  YHDM = CASE WHEN ISNULL(f.bankcode,'')&lt;&gt;'' THEN
+           (SELECT TOP 1 subitemname FROM run.dbo.dictvalue
+            WHERE subitem=f.bankcode AND dictitem='Fsftoxy')
+         ELSE '9998' END,
+  CGFS='2',
+  ZHZT = CASE WHEN d.status IN ('6','7','e') THEN '3'
+              WHEN d.status NOT IN ('6','7','e') AND c.opendate=20260209 THEN '2'
+              ELSE '1' END,
+  JYZH = d.transacc
+FROM run.dbo.oftaaccinfo c, run.dbo.oftaacc d, run.dbo.ofta e,
+     run.dbo.banktranid f, run.dbo.fundinfo g
+WHERE c.fundid=d.fundid AND c.orgid=d.orgid AND c.transacc=d.transacc AND c.tacode=d.tacode
+  AND c.tacode=e.tacode
+  AND c.fundid=f.fundid AND c.fundid=g.fundid AND f.fundid=g.fundid AND f.fundid=d.fundid
+  AND f.moneytype='0' AND g.status&lt;&gt;'*' AND f.status&lt;&gt;'*'
+
+UNION ALL
+-- ============ 段4：基金 TA 账号 · 无三方存管 ============
+SELECT DISTINCT JYPZ='KFJJ',
+  GDZH = ISNULL(CASE c.taacc WHEN '' THEN
+           'T'+RIGHT('00'+CONVERT(varchar(2),c.tacode),2)
+             +RIGHT('0000'+CONVERT(varchar(8),c.orgid),4)
+             +RIGHT('00000'+CONVERT(varchar(12),c.fundid),5)
+           ELSE c.taacc END,''),
+  ZDXW=' ', JGDM=' ',
+  YYBDM = ISNULL((SELECT TOP 1 orgid FROM run.dbo.orgidset WHERE brhid=c.orgid), c.orgid),
+  ZJZH = RIGHT('000000000000'+CONVERT(varchar(20),c.fundid),12),
+  YHDM='9998', CGFS='0',
+  ZHZT = CASE WHEN g.status='*' THEN '3'
+              WHEN g.status&lt;&gt;'*' AND g.opendate=20260209 THEN '2'
+              ELSE '1' END,
+  JYZH = d.transacc
+FROM run.dbo.oftaaccinfo c, run.dbo.oftaacc d, run.dbo.ofta e, run.dbo.fundinfo g
+WHERE c.fundid=d.fundid AND c.orgid=d.orgid AND c.transacc=d.transacc AND c.tacode=d.tacode
+  AND c.tacode=e.tacode AND c.fundid=g.fundid
+  AND c.fundid NOT IN (SELECT fundid FROM run.dbo.banktranid
+                       WHERE orgid=c.orgid AND status&lt;&gt;'*')
+  AND g.status&lt;&gt;'*'
+  AND ISNULL(CASE c.taacc WHEN '' THEN
+         'T'+RIGHT('00'+CONVERT(varchar(2),c.tacode),2)
+           +RIGHT('0000'+CONVERT(varchar(8),c.orgid),4)
+           +RIGHT('00000'+CONVERT(varchar(12),c.fundid),5)
+         ELSE c.taacc END,'') &lt;&gt; ''
+
+UNION ALL
+-- ============ 段5：非 S 类资金 · A股兜底（0/1/6） ============
+SELECT DISTINCT JYPZ = CASE
+    WHEN ISNULL(p.market,'')='0' THEN 'SAGF'
+    WHEN ISNULL(p.market,'')='1' THEN 'HAGF'
+    WHEN ISNULL(p.market,'') IN ('6','B') THEN 'NQAG'
+    WHEN ISNULL(p.market,'')='7' THEN 'NQBG'
+    WHEN ISNULL(p.market,'')='J' THEN 'KFJJ'
+    ELSE ' ' END,
+  GDZH = p.secuid, ZDXW=' ', JGDM=' ',
+  YYBDM = ISNULL((SELECT TOP 1 orgid FROM run.dbo.orgidset WHERE brhid=p.orgid), p.orgid),
+  ZJZH = RIGHT('000000000000'+CONVERT(varchar(20),p.fundid),12),
+  YHDM='9998', CGFS='0',
+  ZHZT = CASE WHEN p.status='*' THEN '3'
+              WHEN p.status&lt;&gt;'*' AND p.opendate=20260209 THEN '2'
+              ELSE '1' END,
+  JYZH=' '
+FROM (
+  SELECT DISTINCT h.*, i.fundname, i.fundid
+  FROM run.dbo.secuid h, run.dbo.fundinfo i
+  WHERE h.status&lt;&gt;'*' AND i.status&lt;&gt;'*' AND h.custid=i.custid
+    AND h.market IN ('0','1','6')
+    AND (h.market&lt;&gt;'1' OR (h.market='1' AND (h.regflag&lt;&gt;'0' OR '1'='1')))
+    AND NOT EXISTS (SELECT TOP 1 selfrunsecuid FROM run.dbo.rptselfrunsecuid
+                    WHERE (selfrunsecuid=h.secuid OR secuid=h.secuid)
+                      AND market=h.market AND bsflag IN ('1N','1O'))
+    AND (i.fundtype='' OR CHARINDEX(i.fundtype,'AB')&gt;0)
+    AND h.custid NOT IN (SELECT custid FROM run.dbo.fundinfo
+                         WHERE CHARINDEX('S',specialkind)&gt;0 AND fundtype IN ('A','B',''))
+UNION ALL
+  -- 段6：京A 兜底段：market='B'，加排除股转A 双挂
+  SELECT ... -- 同上市条件改为 market='B'，并 NOT EXISTS(secuid e 同键且 e.market='6')
+) p</code></pre>
+<p class="small">说明：以上为逻辑整理稿（段2/段6 与对应段仅 market 条件、双挂排除、市场组集合不同，用注释示意省略）。执行日期 <code>20260209</code> 为生成时动态替换的当日业务日期。</p>
+</div>
+
+<footer>
+  本文档基于"银河证券w版股东客户对照生成.sql"原文分析生成 · 生成日期 2026-08-21
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { curve: 'basis', nodeSpacing: 40, rankSpacing: 50 } });
+</script>
+</body>
+</html>

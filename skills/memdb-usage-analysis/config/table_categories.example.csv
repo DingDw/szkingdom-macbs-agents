@@ -92,3 +92,7 @@
 "t_jxh_dzsj_ptdzd_execl_jydz","FALSE","TRUE","交易类"
 "t_jxh_dzsj_ptdzd_txt_ccdz","FALSE","TRUE","资产类"
 "t_jxh_dzsj_ptdzd_txt_jydz","FALSE","TRUE","交易类"
+"node_creditdebtfee","TRUE","TRUE","资产类"
+"node_trade_pledgeright_detail","TRUE","TRUE","资产类"
+"sh_jjgh","TRUE","TRUE","交易类"
+"t_jxh_dzsj_ptdzd_execl_yjs","TRUE","TRUE","交易类"

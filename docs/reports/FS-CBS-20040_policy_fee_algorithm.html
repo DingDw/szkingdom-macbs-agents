@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FS-CBS-20040 策略佣金算法说明</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --text: #1f2933;
+      --muted: #52616b;
+      --line: #d8dee4;
+      --head: #16324f;
+      --accent: #0f766e;
+      --code: #f0f3f6;
+      --warn: #8a5a00;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 24px 48px;
+    }
+    h1, h2, h3 {
+      color: var(--head);
+      line-height: 1.25;
+    }
+    h1 {
+      font-size: 28px;
+      margin: 0 0 8px;
+    }
+    h2 {
+      font-size: 21px;
+      margin: 30px 0 12px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid var(--line);
+    }
+    h3 {
+      font-size: 17px;
+      margin: 22px 0 8px;
+    }
+    p {
+      margin: 8px 0;
+    }
+    .meta, .note {
+      color: var(--muted);
+    }
+    .note {
+      border-left: 4px solid var(--accent);
+      background: #eef8f6;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+    .warn {
+      border-left-color: var(--warn);
+      background: #fff7e6;
+    }
+    code {
+      background: var(--code);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: Consolas, "Courier New", monospace;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      margin: 10px 0 16px;
+      border: 1px solid var(--line);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #eef2f6;
+      color: #243b53;
+      font-weight: 600;
+    }
+    ul, ol {
+      margin: 8px 0 12px 24px;
+      padding: 0;
+    }
+    li {
+      margin: 4px 0;
+    }
+    .formula {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-family: Consolas, "Courier New", monospace;
+      white-space: pre-wrap;
+    }
+    .tag {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 0 6px;
+      color: var(--accent);
+      background: #f8fffd;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>FS-CBS-20040 策略佣金算法说明</h1>
+  <p class="meta">依据：`macbs-base` 与 `macbs-service` 中提交消息包含 `FS-CBS-20040` 的提交记录，以及当前工作树中的策略佣金实现。</p>
+
+  <section>
+    <h2>提交记录检索结果</h2>
+    <p>检索命令：<code>git log --all --regexp-ignore-case --grep="FS-CBS-20040"</code>。`macbs-base` 命中 11 个提交，`macbs-service` 命中 22 个提交。</p>
+
+    <h3>macbs-base</h3>
+    <table>
+      <thead><tr><th>提交</th><th>提交说明</th><th>主要范围</th></tr></thead>
+      <tbody>
+        <tr><td><code>4fb70ebcf71</code></td><td>AIGC,FS-CBS-20040,BUG-18395:【策略佣金】调整小数位截取位数</td><td><code>fee_policy_adjust.cpp</code></td></tr>
+        <tr><td><code>503cb08635c</code></td><td>AIGC,FS-CBS-20040,BUG-18355:【策略佣金】修复优惠券足额时，抵扣后还剩0.01的问题</td><td><code>fee_policy_adjust_common.h</code></td></tr>
+        <tr><td><code>4ac45b5ae30</code></td><td>FS-CBS-20040,BUG-18337:【策略佣金】重复跑500003 策略佣金修正任务，clearamt_old不一致了</td><td><code>fee_policy_adjust_restore.cpp</code></td></tr>
+        <tr><td><code>e9a3a52535c</code></td><td>FS-CBS-20040,BUG-18270:修复fee_seat未加上一级费用</td><td><code>fee_policy_adjust.cpp</code>、<code>fee_policy_adjust_common.h</code></td></tr>
+        <tr><td><code>6afac9ba62a</code></td><td>FS-CBS-20040,BUG-18271,BUG-18270,BUG-18268:修复问题</td><td><code>fee_policy_adjust.cpp</code>、<code>fee_policy_adjust_common.h</code></td></tr>
+        <tr><td><code>55ef213eaa8</code></td><td>AIGC,FS-CBS-20040:【银河证券】佣金策略开发,添加追踪日志</td><td><code>fee_policy_adjust.cpp</code>、<code>fee_policy_adjust_common.h</code></td></tr>
+        <tr><td><code>036db188c73</code></td><td>AIGC,FS-CBS-20040:【银河证券】佣金策略开发完善</td><td><code>fee_policy_adjust_common.h</code></td></tr>
+        <tr><td><code>d290abd3137</code></td><td>AIGC,FS-CBS-20040:【银河证券】佣金策略开发，完善代码</td><td>策略处理、错误码、接口资产表 DAO、测试用例</td></tr>
+        <tr><td><code>7f534cc7ec8</code></td><td>AIGC,FS-CBS-20040:【银河证券】佣金策略开发,完善优惠券逻辑</td><td>策略处理、恢复、测试用例</td></tr>
+        <tr><td><code>24f850df4a8</code></td><td>AIGC,FS-CBS-20040:【银河证券】策略佣金开发，按照代码规约调整代码</td><td><code>fee_policy_adjust</code> 全套处理/分段/恢复类</td></tr>
+        <tr><td><code>a0eff27f298</code></td><td>AIGC,采纳率90%,FS-CBS-20040:【银河证券】佣金策略开发</td><td>功能号、导出、策略修正代码、DAO、字典常量</td></tr>
+      </tbody>
+    </table>
+
+    <h3>macbs-service</h3>
+    <table>
+      <thead><tr><th>提交</th><th>提交说明</th><th>主要范围</th></tr></thead>
+      <tbody>
+        <tr><td><code>ea9782973f5</code></td><td>FS-CBS-20040：【策略佣金】佣金策略客户另类价值复核配置</td><td>数据权限配置</td></tr>
+        <tr><td><code>50be4b25975</code></td><td>FS-CBS-20040：【银河证券】佣金策略开发，去除fee_jzjy_policy_cusothval中busidate作为复核字段</td><td>复核交易配置</td></tr>
+        <tr><td><code>66c896d618c</code></td><td>FS-CBS-20040：【策略佣金】调整菜单复核配置脚本</td><td>菜单复核配置</td></tr>
+        <tr><td><code>d12f50a6f22</code></td><td>FS-CBS-20040:【策略佣金】调整菜单配置</td><td>菜单配置</td></tr>
+        <tr><td><code>fb1f7076d47</code></td><td>FS-CBS-20040:【策略佣金】调整菜单配置</td><td>菜单配置</td></tr>
+        <tr><td><code>7b8eaf95b8a</code></td><td>AIGC,FS-CBS-20040,【策略佣金】完善佣金策略客户另类价值设置页面</td><td>字典、复核、参数服务页面</td></tr>
+        <tr><td><code>c538d38f5cd</code></td><td>FS-CBS-20040：【银河证券】佣金策略添加的流程任务被冲掉，重新提交</td><td>客户流程任务、业务定义</td></tr>
+        <tr><td><code>aa8b12fbd02</code></td><td>FS-CBS-20040：调整内部数据准备流程任务</td><td>内部准备流程</td></tr>
+        <tr><td><code>aa700b5eb15</code></td><td>FS-CBS-20040,BUG-18248:调整文件导入脚本修改</td><td>策略资金账号文件导入</td></tr>
+        <tr><td><code>be76deac917</code></td><td>FS-CBS-20040,BUG-18248:调整策略佣金接口资产表字段可为空，文件导入脚本修改</td><td>策略表、订单资产表、导入配置</td></tr>
+        <tr><td><code>7b6ee6a27d3</code></td><td>FS-CBS-20040：调整佣金策略相关资产文件导入配置</td><td>订单/两融资金资产和股份资产导入</td></tr>
+        <tr><td><code>754cca5f286</code></td><td>FS-CBS-20040：调整佣金策略相关文件导入必要性mandatory_flag为0</td><td>策略与资产文件导入必要性</td></tr>
+        <tr><td><code>cad05c99f45</code></td><td>FS-CBS-20040,BUG-18224:调整银河证券流程脚本</td><td>客户内部准备流程</td></tr>
+        <tr><td><code>e8236a7f8d5</code></td><td>FS-CBS-20040,BUG-18226:调整策略佣金相关文件导入脚本</td><td>策略与资产文件导入配置</td></tr>
+        <tr><td><code>47a85457f97</code></td><td>AIGC,FS-CBS-20040:【银河证券】佣金策略开发代码完善</td><td>归档配置、客户另类价值 DAO/页面</td></tr>
+        <tr><td><code>dd1a24980e7</code></td><td>FS-CBS-20040,BUG-18123:调整策略佣金配置加载配置</td><td>内存库加载配置</td></tr>
+        <tr><td><code>71d733bfd4a</code></td><td>FS-CBS-20040,BUG-18123:修复两融客户清算数据加载至内存任务执行失败</td><td>客户内存库加载配置</td></tr>
+        <tr><td><code>5be96582f83</code></td><td>AIGC,FS-CBS-20040:【银河证券】佣金策略开发,新增fee_jzjy_policy_cusothval增删改查</td><td>客户另类价值模型、DAO、页面</td></tr>
+        <tr><td><code>4b4dc092b32</code></td><td>AIGC,FS-CBS-20040:【银河证券】佣金策略开发，完善代码</td><td>策略表、接口资产表、错误码、归档、导入、流程</td></tr>
+        <tr><td><code>4b4a98d3d74</code></td><td>AIGC,FS-CBS-20040:【银河证券】佣金策略开发,完善优惠券逻辑</td><td>客户另类价值表、归档和加载配置</td></tr>
+        <tr><td><code>ea635995c7c</code></td><td>FS-CBS-20040:【银河证券】佣金策略开发,修改fee_jzjy_policy_type中pt_operway字段长度为256</td><td>策略区间表与导入配置</td></tr>
+        <tr><td><code>4d31dfa0374</code></td><td>AIGC,采纳率90%,FS-CBS-20040:【银河证券】佣金策略开发</td><td>模型、脚本、流程、策略表、资产接口表、历史表</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>功能号与流程位置</h2>
+    <table>
+      <thead><tr><th>功能号</th><th>导出类/函数</th><th>用途</th><th>来源</th></tr></thead>
+      <tbody>
+        <tr><td><code>630009</code></td><td><code>CFeePolicyAdjustRestore / DoFeePolicyAdjustRestore</code></td><td>策略佣金修正恢复。重做时恢复旧佣金、旧净佣金、旧清算金额，并清理当日累计统计。</td><td><code>macbs-base/lbm_pro/macbs/cbs_fee/export.cpp</code>、<code>bin64/conf/frame.xml</code></td></tr>
+        <tr><td><code>630010</code></td><td><code>CFeePolicyAdjustCalcRange / DoFeePolicyAdjustCalcRange</code></td><td>按资金账号生成分段范围，保证同一资金账号的累计/累进策略在同一分段内处理。</td><td><code>fee_policy_adjust_calcrange.cpp</code></td></tr>
+        <tr><td><code>630011</code></td><td><code>CFeePolicyAdjust / DoFeePolicyAdjust</code></td><td>策略佣金修正处理，覆盖 2/3/4/5 策略模式。</td><td><code>fee_policy_adjust.cpp</code></td></tr>
+      </tbody>
+    </table>
+    <p>银河证券流程配置中，记录号 <code>500003</code> 配置为“策略佣金修正”，同一 <code>comm_flowrecord</code> 使用 <code>prehandlefuncid=630009</code>、<code>shardingfuncid=630010</code>、<code>funcid=630011</code>，处理参数包含 <code>threadNum</code> 和 <code>markets</code>。</p>
+  </section>
+
+  <section>
+    <h2>公共数据准备口径</h2>
+    <h3>待处理流水</h3>
+    <table>
+      <thead><tr><th>数据项</th><th>来源</th><th>用途/口径</th></tr></thead>
+      <tbody>
+        <tr><td>交割流水</td><td><code>node_settdetail</code> 应用缓存；过滤 <code>createdate=busidate</code>、<code>market in markets</code>、<code>status != 无效</code>、<code>matchstatus != 未配对</code>、非挂账资金账号；处理阶段再按 <code>beginfundacct/endfundacct</code> 过滤。</td><td>策略佣金修正的主体数据。</td></tr>
+        <tr><td>策略资金账号</td><td><code>fee_jzjy_policy_fundinfo.serverid/orgid/fundid/policyid/policykind</code>；代码将 <code>node_settdetail.fundacct</code> 转为数值型 <code>fundid</code> 匹配。</td><td>判断资金账号是否启用 2/3/4/5 策略，并取得策略类型和策略品种。</td></tr>
+        <tr><td>业务统计开关</td><td><code>comm_busidefine.busitype/policy_fee_stat_flag</code>。</td><td>除资产量策略外，只有 <code>policy_fee_stat_flag='1'</code> 的业务类别参与策略成交量统计和修正。</td></tr>
+        <tr><td>普通佣金等价匹配上下文</td><td><code>node_settdetail</code>、<code>node_trade</code>、<code>comm_busitypemapped</code>、<code>fee_jzjy_stktrd</code>、<code>comm_stktemplate_out</code>、<code>comm_stock</code>、<code>comm_warrant</code>、<code>comm_marketcurcode</code>。</td><td>生成策略匹配字段：费用市场、证券代码、交易类别、操作方式、费用证券类别、买卖类别、币种，保持与 630000 集中交易佣金匹配口径一致。</td></tr>
+        <tr><td>合笔口径</td><td><code>node_settdetail</code> 字段：<code>orgid/fundacct/secuid/market/orderdate/applycode/busitype/stkcode/matchamt</code>；合笔业务集合来自混合参数 <code>PARAMID_JZJY_FEE_MERGE_BUSITYPE</code>。</td><td>配置为普通佣金合笔的业务，按同一 key 合并成交金额，代表流水取绝对成交金额较大的分笔；修正后再按分笔成交金额比例拆回。</td></tr>
+        <tr><td>策略计费成交金额</td><td><code>abs(node_settdetail.matchamt)</code>，合笔时使用合笔后的正向成交金额。</td><td>计算候选策略佣金：<code>策略计费成交金额 * 费率</code>。</td></tr>
+        <tr><td>折算成交金额</td><td><code>abs(node_settdetail.matchamt)</code> 与 <code>fee_jzjy_policy_stkscale.serverid/orgid/market/stktype/stkscale</code>。</td><td>统计控制值用。若命中证券类别权重且 <code>stkscale &gt; 0</code>，则 <code>折算成交金额 = 正向成交金额 * stkscale</code>；否则等于正向成交金额。</td></tr>
+      </tbody>
+    </table>
+
+    <h3>策略区间通用匹配</h3>
+    <table>
+      <thead><tr><th>数据项</th><th>来源</th><th>匹配规则</th></tr></thead>
+      <tbody>
+        <tr><td>策略区间</td><td><code>fee_jzjy_policy_type.serverid/orgid/policyid/policykind/sno/moneytype/pt_trdid/pt_market/pt_stkcode/pt_operway/pt_stktype/pt_bsflag/ctrlvalue/feerate/minfee/maxfee</code>。</td><td>先按交易类别精确匹配 <code>pt_trdid</code>，未命中再按通配交易类别匹配；市场、证券代码、操作方式、证券类别、买卖类别按策略范围字段过滤。</td></tr>
+        <tr><td>控制值命中</td><td><code>fee_jzjy_policy_type.ctrlvalue</code> 与各模式计算出的控制值。</td><td>候选区间按 <code>ctrlvalue</code> 倒序，命中满足 <code>ctrlvalue &lt; 控制值</code> 的最高档；<code>ctrlvalue=0</code> 且控制值小于 <code>0.01</code> 时可命中零档。</td></tr>
+        <tr><td>候选佣金</td><td><code>fee_jzjy_policy_type.feerate/minfee/maxfee</code> 与策略计费成交金额。</td><td>基础公式为 <code>策略计费成交金额 * feerate</code>，之后按 <code>minfee/maxfee</code> 裁剪；<code>maxfee=0</code> 或 <code>minfee=0</code> 表示不控制对应边界。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>模式 2：全日成交量区间</h2>
+    <p><span class="tag">policyid=2 / TDDRG_MARK</span> 先按资金账号、币种、策略品种汇总全市场折算成交金额，再用该总量为每笔流水选择费率。</p>
+
+    <h3>输入与来源</h3>
+    <table>
+      <thead><tr><th>数据项</th><th>来源</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>策略启用信息</td><td><code>fee_jzjy_policy_fundinfo.policyid='2'</code>、<code>serverid/orgid/fundid/policykind</code>。</td><td>只处理已配置全日成交量策略的资金账号。</td></tr>
+        <tr><td>可统计业务范围</td><td><code>comm_busidefine.policy_fee_stat_flag='1'</code>。</td><td>只有参与策略佣金统计的业务类别才进入全日总量。</td></tr>
+        <tr><td>匹配上下文</td><td>公共数据准备中的普通佣金等价匹配上下文。</td><td>用于判断该笔流水是否落入策略区间适用范围。</td></tr>
+        <tr><td>全日控制值</td><td><code>node_settdetail.matchamt</code> + <code>fee_jzjy_policy_stkscale.stkscale</code>。</td><td>按 key <code>orgid|fundacct|moneytype|policykind</code> 汇总折算成交金额。</td></tr>
+        <tr><td>区间费率</td><td><code>fee_jzjy_policy_type</code>。</td><td>使用全日控制值命中 <code>ctrlvalue/feerate/minfee/maxfee</code>。</td></tr>
+      </tbody>
+    </table>
+
+    <h3>算法</h3>
+    <ol>
+      <li>遍历待处理流水，筛选 <code>policyid=2</code> 且 <code>policy_fee_stat_flag='1'</code> 的流水。</li>
+      <li>构造普通佣金等价匹配上下文；如果没有任何策略区间覆盖该流水范围，则该笔不计入全日总量。</li>
+      <li>计算折算成交金额：<code>foldMatchAmt = abs(matchamt) * stkscale</code>，未配置有效权重时使用 <code>abs(matchamt)</code>。</li>
+      <li>按 <code>orgid|fundacct|moneytype|policykind</code> 汇总得到 <code>dayTotalFoldMatchAmt</code>。</li>
+      <li>逐笔处理时，以 <code>dayTotalFoldMatchAmt</code> 为控制值，在 <code>fee_jzjy_policy_type</code> 中查找命中区间。</li>
+      <li>候选策略佣金：<code>policyFee = ApplyMinMax(abs(matchamt) * feerate, minfee, maxfee)</code>。</li>
+    </ol>
+    <div class="formula">控制值 = sum(abs(node_settdetail.matchamt) * fee_jzjy_policy_stkscale.stkscale)
+分组键 = node_settdetail.orgid + node_settdetail.fundacct + 匹配币种 + fee_jzjy_policy_fundinfo.policykind
+候选佣金 = min/max 裁剪(abs(node_settdetail.matchamt) * fee_jzjy_policy_type.feerate)</div>
+  </section>
+
+  <section>
+    <h2>模式 3：累计成交量区间</h2>
+    <p><span class="tag">policyid=3 / ALTRD_MARK</span> 维护客户周期累计成交金额。本笔成交会跨越一个或多个区间时，按区间分段分别套费率后合计。</p>
+
+    <h3>输入与来源</h3>
+    <table>
+      <thead><tr><th>数据项</th><th>来源</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>策略启用信息</td><td><code>fee_jzjy_policy_fundinfo.policyid='3'</code>、<code>serverid/orgid/fundid/policykind</code>。</td><td>确定资金账号采用累计成交量策略。</td></tr>
+        <tr><td>可统计业务范围</td><td><code>comm_busidefine.policy_fee_stat_flag='1'</code>。</td><td>未开启统计的业务类别不进入累计策略。</td></tr>
+        <tr><td>统计周期配置</td><td><code>fee_jzjy_policy_stat.busidate/serverid/sno/orgid/policyid/policykind/moneytype/pt_*/cycleflag/cyclevalue/begindate</code>。</td><td>按普通佣金等价上下文匹配统计配置，取得 <code>sno</code> 与周期开始日。</td></tr>
+        <tr><td>客户累计状态</td><td><code>fee_jzjy_policy_cusstatmy.busidate/serverid/orgid/fundacct/moneytype/policyid/policykind/sno/totmatchamt/totmatchamttmp/totfee/totfeetmp/prvtotmatchamt</code>。</td><td>当日无记录时从上一日同主键记录承接；若 <code>fee_jzjy_policy_stat.begindate=busidate</code>，则新周期从 0 开始。</td></tr>
+        <tr><td>区间费率</td><td><code>fee_jzjy_policy_type.ctrlvalue/feerate/minfee/maxfee</code>。</td><td>分段计费时按控制值升序组织区间。</td></tr>
+      </tbody>
+    </table>
+
+    <h3>算法</h3>
+    <ol>
+      <li>匹配 <code>fee_jzjy_policy_stat</code>，取得统计 <code>sno</code> 和周期信息。</li>
+      <li>按主键 <code>busidate, serverid, fundacct, moneytype, sno, orgid, policyid, policykind</code> 获取或创建当日 <code>fee_jzjy_policy_cusstatmy</code>。</li>
+      <li>设置本笔累计起点 <code>begin = cusstatmy.totmatchamttmp</code>，终点 <code>end = begin + foldMatchAmt</code>。</li>
+      <li>收集适用的 <code>fee_jzjy_policy_type</code> 区间，按 <code>ctrlvalue</code> 升序排列。</li>
+      <li>从 <code>begin + 0.01</code> 所在区间开始，循环切分到下一档控制值或 <code>end</code>。</li>
+      <li>每段折算成交金额 <code>sectionFold = sectionEnd - cursor</code>；还原本笔实际成交金额份额 <code>sectionMatchAmt = abs(matchamt) * sectionFold / (end - begin)</code>。</li>
+      <li>每段费用 <code>sectionMatchAmt * 当前区间费率</code>，各段相加后按最后命中区间的 <code>minfee/maxfee</code> 做裁剪。</li>
+      <li>更新 <code>cusstatmy.totmatchamttmp/totmatchamt=end</code>，并将候选佣金累加到 <code>totfeetmp/totfee</code>。</li>
+    </ol>
+    <div class="formula">begin = fee_jzjy_policy_cusstatmy.totmatchamttmp
+end = begin + 折算成交金额
+sectionMatchAmt = abs(node_settdetail.matchamt) * (sectionEnd - cursor) / (end - begin)
+候选佣金 = min/max 裁剪(sum(sectionMatchAmt * section.feerate))</div>
+  </section>
+
+  <section>
+    <h2>模式 4：累进成交量区间</h2>
+    <p><span class="tag">policyid=4 / NTTRD_MARK</span> 使用上一周期累计成交金额选择本期适用费率，本笔成交不跨档拆分。</p>
+
+    <h3>输入与来源</h3>
+    <table>
+      <thead><tr><th>数据项</th><th>来源</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>策略启用信息</td><td><code>fee_jzjy_policy_fundinfo.policyid='4'</code>、<code>serverid/orgid/fundid/policykind</code>。</td><td>确定资金账号采用累进成交量策略。</td></tr>
+        <tr><td>可统计业务范围</td><td><code>comm_busidefine.policy_fee_stat_flag='1'</code>。</td><td>未开启统计的业务类别不进入累进策略。</td></tr>
+        <tr><td>统计周期配置</td><td><code>fee_jzjy_policy_stat</code>。</td><td>用于取得统计 <code>sno</code> 并创建/承接客户累计统计。</td></tr>
+        <tr><td>上一周期累计控制值</td><td><code>fee_jzjy_policy_cusstatmy.prvtotmatchamt</code>。</td><td>创建当日统计记录时，从上一日同主键 <code>totmatchamt</code> 写入；若新周期从 0 开始，当前累计值重置但 <code>prvtotmatchamt</code> 保留为上期累计参考。</td></tr>
+        <tr><td>区间费率</td><td><code>fee_jzjy_policy_type.ctrlvalue/feerate/minfee/maxfee</code>。</td><td>用 <code>prvtotmatchamt</code> 一次性命中区间。</td></tr>
+      </tbody>
+    </table>
+
+    <h3>算法</h3>
+    <ol>
+      <li>匹配统计配置并获取/创建当日 <code>fee_jzjy_policy_cusstatmy</code>。</li>
+      <li>控制值取 <code>cusstatmy.prvtotmatchamt</code>，即上一周期累计成交金额。</li>
+      <li>在 <code>fee_jzjy_policy_type</code> 中按通用规则命中区间。</li>
+      <li>候选策略佣金：<code>policyFee = ApplyMinMax(abs(matchamt) * feerate, minfee, maxfee)</code>。</li>
+      <li>无论是否命中区间，都会将本笔折算成交金额累加到 <code>cusstatmy.totmatchamttmp</code> 并同步 <code>totmatchamt</code>；命中时再累加 <code>totfeetmp/totfee</code>。</li>
+    </ol>
+    <div class="formula">控制值 = fee_jzjy_policy_cusstatmy.prvtotmatchamt
+候选佣金 = min/max 裁剪(abs(node_settdetail.matchamt) * fee_jzjy_policy_type.feerate)
+统计更新 = totmatchamttmp + 折算成交金额</div>
+  </section>
+
+  <section>
+    <h2>模式 5：资产量区间</h2>
+    <p><span class="tag">policyid=5 / ASSRG_MARK</span> 使用订单下场资金资产和股份市值合计作为控制值。该模式不依赖 <code>comm_busidefine.policy_fee_stat_flag</code> 过滤业务统计范围。</p>
+
+    <h3>输入与来源</h3>
+    <table>
+      <thead><tr><th>数据项</th><th>来源</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>策略启用信息</td><td><code>fee_jzjy_policy_fundinfo.policyid='5'</code>、<code>serverid/orgid/fundid/policykind</code>。</td><td>确定资金账号采用资产量区间策略。</td></tr>
+        <tr><td>资金资产</td><td><code>intf_order_fundasset.fundid/moneytype/fundbal/fundbuysale/funduncomebuy/funduncomesale</code>。</td><td>按 <code>fundid=ToInt64(fundacct)</code> 和匹配币种查询；无资金资产记录时报错，不能按 0 处理。</td></tr>
+        <tr><td>股份资产数量</td><td><code>intf_order_stkasset.fundid/moneytype/market/stkcode/stkbal/stkbuysale/stkuncomebuy/stkuncomesale</code>。</td><td>数量口径：<code>stkbal + stkbuysale + stkuncomebuy - stkuncomesale</code>；数量为 0 的记录跳过。</td></tr>
+        <tr><td>证券与市值</td><td><code>comm_stock.market/stkcode/stkid</code>、<code>comm_stkprice</code>、<code>comm_marketcurcode</code>、<code>comm_exchangerate</code>，通过 <code>CMarketValueUtil::GetMarketValue</code> 计算。</td><td>找不到证券或汇率时报错；找不到行情时记录告警并使用市值工具返回值。面值兜底参数来自 <code>PARAMID_MKTVALUE_CALAC_WITH_TICKPRICE_SWITCH</code> 和 <code>PARAMID_MKTVALUE_CALAC_WITH_TICKPRICE_FUNDKIND</code>。</td></tr>
+        <tr><td>区间费率</td><td><code>fee_jzjy_policy_type.ctrlvalue/feerate/minfee/maxfee</code>。</td><td>用资产量合计作为控制值命中区间。</td></tr>
+      </tbody>
+    </table>
+
+    <h3>算法</h3>
+    <ol>
+      <li>按资金账号和币种读取 <code>intf_order_fundasset</code>，资金资产合计为 <code>fundbal + fundbuysale - funduncomebuy + funduncomesale</code>。</li>
+      <li>按资金账号和币种读取 <code>intf_order_stkasset</code>，逐条计算股份数量。</li>
+      <li>对每条非零股份数量，按市场和证券代码读取 <code>comm_stock</code>，再通过市值工具结合行情、市场币种和汇率计算市值。</li>
+      <li>资产量控制值 <code>assetAmt = 资金资产合计 + 股份市值合计</code>。</li>
+      <li>在 <code>fee_jzjy_policy_type</code> 中按 <code>assetAmt</code> 命中区间。</li>
+      <li>候选策略佣金：<code>policyFee = ApplyMinMax(abs(matchamt) * feerate, minfee, maxfee)</code>。</li>
+    </ol>
+    <div class="formula">资金资产 = sum(fundbal + fundbuysale - funduncomebuy + funduncomesale)
+股份数量 = stkbal + stkbuysale + stkuncomebuy - stkuncomesale
+资产量 = 资金资产 + sum(CMarketValueUtil::GetMarketValue(stkid, busidate, 股份数量))
+候选佣金 = min/max 裁剪(abs(node_settdetail.matchamt) * fee_jzjy_policy_type.feerate)</div>
+  </section>
+
+  <section>
+    <h2>最终费用决策与回写</h2>
+    <table>
+      <thead><tr><th>数据项</th><th>来源</th><th>算法/用途</th></tr></thead>
+      <tbody>
+        <tr><td>原手续费</td><td><code>node_settdetailsub.fieldname='fee_seat'</code>，不存在时取 <code>node_settdetail.fee_seat</code>。</td><td>作为原始候选值，并决定策略佣金写回正负方向。</td></tr>
+        <tr><td>原净佣金</td><td><code>node_settdetailsub.fieldname='fee_yjf'</code>。</td><td>修正前写入 <code>fee_yjf_old</code> 备份。</td></tr>
+        <tr><td>原清算金额</td><td><code>node_settdetailsub.fieldname='clearamt'</code>，不存在时取 <code>node_settdetail.clearamt</code>。</td><td>修正前写入 <code>clearamt_old</code> 备份，重做恢复使用。</td></tr>
+        <tr><td>一级费用合计</td><td><code>node_settdetailsub</code> 中 <code>fee_yhs/fee_qsf/fee_jsf/fee_zgf/fee_jggf/fee_ghf/fee_fxj/fee_other/fee_chjzf/fee_jygf</code>。</td><td>按绝对值求和，形成总手续费中的固定一级费用部分。</td></tr>
+        <tr><td>佣金优先标志</td><td>优先取 <code>fee_jzjy_orgpriorflag.serverid/orgid/feepriorflag</code>；未配置时回退混合参数 <code>PARAMID_JZJY_YJYXBZ</code>。</td><td><code>2-动态佣金优先</code> 时用策略佣金；<code>0-最低优先</code> 时取原手续费与策略佣金绝对值较小者；其他值保留原手续费。</td></tr>
+        <tr><td>手续费小于模式</td><td>混合参数 <code>PARAMID_JZJY_SXFXHMS</code>。</td><td>当值为 <code>3</code> 且最终手续费绝对值小于一级费用合计时，最终手续费按一级费用合计兜底。</td></tr>
+        <tr><td>优惠券抵扣</td><td><code>fee_jzjy_policy_cusothval</code>，当日数据由上一日或 <code>busidate=0</code> 记录生成。</td><td>当前代码实现会对净佣金应用优惠券抵扣，并更新可用余额。若按需求文字“暂不处理优惠券抵扣”验收，可将此项视为当前代码后续增强。</td></tr>
+        <tr><td>费用备注</td><td><code>node_settdetail.fee_remark</code>。</td><td>追加 <code>策略佣金[类型;序号;控制值;费率;资产量;策略佣金;优惠券;最终手续费;净佣金;优先标志]</code>，不覆盖原普通佣金备注。</td></tr>
+        <tr><td>清算金额重算</td><td><code>comm_busidefine.clearamt_valueexplain</code> 与 <code>node_settdetailsub</code> 修正后费用字段。</td><td>策略修正后按业务定义表达式重算 <code>node_settdetail.clearamt</code> 并写回子表 <code>clearamt</code>。</td></tr>
+      </tbody>
+    </table>
+
+    <h3>总决策公式</h3>
+    <div class="formula">signedPolicyFee = 原手续费为负 ? -abs(候选策略佣金) : abs(候选策略佣金)
+if 佣金优先标志 == 动态佣金优先:
+    finalSeat = signedPolicyFee
+else if 佣金优先标志 == 最低优先:
+    finalSeat = abs(原手续费) &gt; abs(signedPolicyFee) ? signedPolicyFee : 原手续费
+else:
+    finalSeat = 原手续费
+
+if 手续费小于模式 == 按一级费用兜底 and abs(finalSeat) &lt; 一级费用合计:
+    finalSeat = 原手续费方向对应的 +/- 一级费用合计
+
+finalYjf = finalSeat 扣除一级费用后的净佣金
+finalYjf = 应用优惠券抵扣后的净佣金
+finalSeat = finalYjf 加回一级费用后的总手续费</div>
+  </section>
+
+  <section>
+    <h2>重做恢复口径</h2>
+    <ol>
+      <li>恢复功能只在重做标志开启时执行。</li>
+      <li>按当日交割流水和流程市场范围扫描 <code>node_settdetail</code>。</li>
+      <li>若 <code>node_settdetailsub</code> 存在 <code>fee_seat_old</code>，表示该流水已被策略佣金修正，需要恢复。</li>
+      <li>将 <code>fee_seat_old/fee_yjf_old/clearamt_old</code> 回写到 <code>fee_seat/fee_yjf/clearamt</code>，删除本次策略佣金追加的 <code>fee_remark</code> 摘要。</li>
+      <li>删除旧值备份字段 <code>fee_seat_old/fee_yjf_old/clearamt_old</code>，避免下次处理误判。</li>
+      <li>删除当日 <code>fee_jzjy_policy_cusstatmy</code> 和当日优惠券记录，处理功能再从上一日数据重新生成。</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>主要代码证据</h2>
+    <table>
+      <thead><tr><th>证据</th><th>路径</th></tr></thead>
+      <tbody>
+        <tr><td>策略处理主流程、四类策略分支、最终费用回写</td><td><code>macbs-base/lbm_pro/macbs/cbs_fee/fee_policy_adjust/fee_policy_adjust.cpp</code></td></tr>
+        <tr><td>匹配上下文、区间命中、累计分段、资产量计算、最终费用决策</td><td><code>macbs-base/lbm_pro/macbs/cbs_fee/fee_policy_adjust/fee_policy_adjust_common.h</code></td></tr>
+        <tr><td>分段功能</td><td><code>macbs-base/lbm_pro/macbs/cbs_fee/fee_policy_adjust/fee_policy_adjust_calcrange.cpp</code></td></tr>
+        <tr><td>重做恢复</td><td><code>macbs-base/lbm_pro/macbs/cbs_fee/fee_policy_adjust/fee_policy_adjust_restore.cpp</code></td></tr>
+        <tr><td>策略类型常量</td><td><code>macbs-base/library/macbs/include/macbs_dict.h</code>：<code>2-全日成交量区间</code>、<code>3-累计成交量区间</code>、<code>4-累进成交量区间</code>、<code>5-资产量区间</code></td></tr>
+        <tr><td>策略表和接口资产表模型</td><td><code>macbs-service/database/pdma/split_pdm/MACBS-V3/tables</code></td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>

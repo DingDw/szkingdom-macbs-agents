@@ -4,6 +4,7 @@
 
 - 项目分为日终清算和日间清算两个大的业务模块组成。
 - 代码阅读/代码分析/二次开发时，优先只考虑日终清算，除非用户指定了与日间清算的交互
+- `macbs-base`和`macbs-service`目录是两个单独的git目录
 
 ## macbs-base模块
 
@@ -87,3 +88,13 @@
 - 默认不直接执行数据库脚本；需要验证时先说明目标数据库类型、库名、脚本路径和执行顺序。
 - 仅清理增量 SQL 时使用 `macbs-service/database/script/clean_patch_sql.bat` 或 `clean_patch_sql.sh`，它只处理 `script/patch` 下的 `.sql` 和空目录；不要用手写递归删除替代。
 - 交付前至少检查新增 SQL 所在路径是否匹配数据库类型和清算场景，并用 `rg` 查同名表、同名字典、同名流程配置在 `full/`、`patch/`、客户目录中的已有定义。
+
+## MCP规则
+
+### 当触发 [postgres-mcp] 工具时
+
+- 当使用`ddw_config`连接数据库执行配置分析时, 一般会同时处理标准版本和多个个性化版本。其中每个版本对应不同的schema，对应关系为：标准-ddw_config;东方财富-ddw_config_dfcf;广发证券-ddw_config_gfzq;国投证券-ddw_config_gtzq;国信证券-ddw_config_gxzq;华兴证券-ddw_config_hxzq;银河证券-ddw_config_yhzq;中金财富-ddw_config_zjcf;中信建投-ddw_config_zxjt;
+
+## openspec规则
+
+- 所有openspec artifacts**必须**使用**中文**描述。

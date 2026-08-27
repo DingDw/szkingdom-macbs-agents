@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>node_gdkhdz 股东客户对照表生成逻辑分析</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --primary: #1a5fb4;
+    --accent: #26a269;
+    --border: #d8dee4;
+    --bg-soft: #f6f8fa;
+    --code-bg: #f0f1f3;
+    --text: #24292f;
+    --warn-bg: #fff8e1;
+    --warn-border: #f5c518;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    color: var(--text);
+    margin: 0;
+    padding: 24px 16px;
+    background: #fbfcfd;
+    line-height: 1.7;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { color: var(--primary); border-bottom: 3px solid var(--primary); padding-bottom: 10px; font-size: 26px; }
+  h2 {
+    color: var(--primary); margin-top: 40px; font-size: 20px;
+    border-left: 5px solid var(--primary); padding-left: 10px;
+    background: linear-gradient(90deg, rgba(26,95,180,0.08), transparent);
+  }
+  h3 { font-size: 16px; margin-top: 24px; color: #14508c; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; background: #fff; }
+  th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #eaf1f9; color: #143d66; font-weight: 600; white-space: nowrap; }
+  tr:nth-child(even) td { background: var(--bg-soft); }
+  code {
+    background: var(--code-bg); padding: 1px 5px; border-radius: 4px;
+    font-family: Consolas, "Courier New", monospace; font-size: 13px;
+  }
+  pre {
+    background: #1f2430; color: #d5d8e2; padding: 14px 16px; border-radius: 8px;
+    overflow-x: auto; font-size: 13px; line-height: 1.6;
+  }
+  pre code { background: transparent; color: inherit; padding: 0; }
+  .card {
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; margin: 16px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .pill {
+    display: inline-block; background: #eaf1f9; color: #14508c;
+    border-radius: 12px; padding: 1px 10px; font-size: 12px; margin-right: 6px;
+  }
+  .tag-blue   { background: #e2f0ff; color: #0b5cab; }
+  .tag-green  { background: #e6f6ec; color: #177245; }
+  .tag-orange { background: #fff2e0; color: #9c5a00; }
+  .tag-purple { background: #f0eaff; color: #6a3db8; }
+  .warn {
+    background: var(--warn-bg); border: 1px solid var(--warn-border);
+    border-radius: 8px; padding: 10px 14px; font-size: 14px; margin: 14px 0;
+  }
+  .field-table td:first-child { font-weight: 600; color: #14508c; white-space: nowrap; }
+  .small { font-size: 12px; color: #57606a; }
+  .mermaid { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin: 14px 0; text-align: center; }
+  footer { margin-top: 48px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px; color: #57606a; }
+  ul { padding-left: 22px; }
+  li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>📋 node_gdkhdz 股东客户对照表 — 生成逻辑分析</h1>
+<p>
+  <span class="pill tag-blue">模块：新意报表（report）</span>
+  <span class="pill tag-green">业务对象：607040100</span>
+  <span class="pill tag-purple">导出接口：XY_GDKHDZ / XY_GDKHDZ_RPT</span>
+  <span class="pill tag-orange">主类：GdkhdzHandler / GdkhdzTask</span>
+</p>
+<p>
+  <code>node_gdkhdz</code>（股东客户对照信息）是供<b>新意报表</b>导出的数据源表，存储"股东账户 —
+  资金账户 — 银行/存管 — 营业部/席位"的对照关系。生成过程将 MACBS 内部的
+  <code>node_secuid</code>（股东账户）、<code>node_fundacct_bank</code>（资金账号银行信息）、
+  <code>node_fundacct</code>（资金账户）三张表的数据，按新意格式规范进行编码转换后落库，供 C++
+  批量导出流程 <code>BATCH_FILE_IMP_EXP_OUT_FLOW</code> 导出为新意股东客户对照文件。
+</p>
+
+<h2>一、总体处理流程图</h2>
+<div class="card">
+<div class="mermaid">
+flowchart TD
+    A[doBusiness 开始<br/>解析流程入参 params] --> B[加载新意转换配置表<br/>comm_xyexport_mapped]
+    B --> C[构建五类转换映射<br/>mapYhdm / mapJypz / mapZhzt / mapYybdm / mapCgfs]
+    C --> D[查询系统参数<br/>默认存管银行/席位类型/B股外币模式/另库虚拟银行]
+    D --> E{遍历计算节点实例<br/>getNodeInstancesBySettbody}
+    E --> F[切换数据源到实例]
+    F --> G[truncate 清空 node_gdkhdz]
+    G --> H{partid 是否在<br/>exportPartids 中}
+    H -- 否 --> E
+    H -- 是 --> I[distinctNodeSecuid<br/>查询 node_secuid 全部股东代码]
+    I --> J{有股东数据?}
+    J -- 无 --> E
+    J -- 有 --> K[按 secuid 排序并按<br/>perProcsize 分批]
+    K --> L[线程池1 并发提交<br/>gdkhdzTask.createGdkhdz 每批生成]
+    L --> M[收集生成结果<br/>Map&lt;实例, List&lt;NodeGdkhdz&gt;&gt;]
+    M --> N{结果非空}
+    N -- 空 --> P2
+    N -- 非空 --> O[线程池2 并发提交<br/>gdkhdzTask.SaveGdkhdz 落库]
+    O --> P[batchInsert 每 1 万条一批<br/>再开线程并发插入]
+    P --> P2[等待全部任务完成]
+    P2 --> Q{全部成功?}
+    Q -- 否 --> R[抛异常 BASEERR_CODE_103018486<br/>生成股东客户对照失败]
+    Q -- 是 --> S[重置数据源为默认库]
+    S --> T[结束]
+</div>
+<p class="small">图 1：清算流程（doBusiness）整体处理流程图。手动入口 nodeGdkhdzGenerate 在 doBusiness 完成后还会追加调用 C++ 导出流程（见图 2）。</p>
+</div>
+
+<h2>二、入口与触发方式</h2>
+
+<div class="card">
+<h3>2.1 两个触发入口</h3>
+<table>
+  <tr><th style="width:160px">入口</th><th>说明</th><th>触发路径</th></tr>
+  <tr>
+    <td><b>清算流程自动执行</b><br/>doBusiness</td>
+    <td>日终清算流程中调用 <code>runBusiness → doBusiness</code>，按流程参数生成股东客户对照数据（仅生成表数据，不导出）。</td>
+    <td><code>NodeGdkhMapped-bex.xml</code>：bex id=<code>createGdkhdz</code>，bean=<code>gdkhdzHandler</code>，method=<code>runBusiness</code>；业务对象 607040100</td>
+  </tr>
+  <tr>
+    <td><b>手动重新生成+导出</b><br/>nodeGdkhdzGenerate</td>
+    <td>前端"新意报表 → 股东客户对照"页面触发，<b>先重新生成表数据、再调用 C++ 导出新意文件</b>（XY_GDKHDZ_RPT）。</td>
+    <td>API：<code>POST /nodeGdkhdzGenerate</code>（base_api 注册：607040100/607040130）<br/>前端：<code>NodeGdkhdz.json</code> 页面按钮</td>
+  </tr>
+</table>
+
+<h3>2.2 nodeGdkhdzGenerate（手动入口）步骤</h3>
+<div class="mermaid">
+flowchart LR
+    A[校验入参<br/>busidate / exportPartids 非空] --> B[校验无正在运行的清算流程<br/>regenerateCheck]
+    B --> C[构造固定参数<br/>perProcsize=100000|threadNum=32|exportPartids=xxx]
+    C --> D[this.doBusiness<br/>重新生成表数据]
+    D --> E[注册中心获取第 1 个计算节点]
+    E --> F[CallNodeUtil.callNode 调 C++ 导出<br/>func_id=BATCH_FILE_IMP_EXP_OUT_FLOW<br/>intfid=XY_GDKHDZ fileid=XY_GDKHDZ_RPT<br/>iodirect=O dbtype=1 partid=*]
+    F --> G[checkCallIsSuccess<br/>校验计算节点返回码=0]
+</div>
+<p class="small">图 2：手动重新生成并导出流程。</p>
+</div>
+
+<h2>三、数据流</h2>
+
+<div class="card">
+<div class="mermaid">
+flowchart LR
+    subgraph SRC["数据源（节点实例库）"]
+        A1["node_secuid<br/>股东账户（主表）<br/>secuid/fundacct/market/trdseat<br/>mainseat/status/open_date<br/>orgid/ext_cls"]
+        A2["node_fundacct_bank<br/>资金账号银行信息<br/>fundacct/curcode/bankcode<br/>status in (0,1,4)"]
+        A3["node_fundacct<br/>资金账户<br/>fundacct/orgid/curcode"]
+    end
+    subgraph CFG["配置（默认数据源）"]
+        B1["comm_xyexport_mapped<br/>新意转换配置表<br/>yhdm/jypz/gdkhzt/yybdm/cgfs"]
+        B2["系统参数 62915/67036/67057<br/>67077/67078/67079"]
+    end
+    subgraph TRANS["转换处理（GdkhdzTask）"]
+        C1["selectGdkhdzEntity<br/>三表关联查询"]
+        C2["processNodeGdkhdzs<br/>H股多币种拆分"]
+        C3["parallelStream 逐条转换<br/>银行/存管·交易品种·状态<br/>另库虚拟银行·左补零·去重"]
+    end
+    subgraph DST["目标"]
+        D1["node_gdkhdz<br/>股东客户对照信息"]
+        D2["新意导出文件<br/>XY_GDKHDZ_RPT"]
+    end
+    A1 --> C1
+    A2 --> C1
+    A3 --> C1
+    B1 --> C3
+    B2 --> C3
+    C1 --> C2 --> C3 --> D1 --> D2
+</div>
+<p class="small">图 3：数据流总览。源表数据来自各计算节点实例库；转换配置来自默认数据源（标准库）；目标表 node_gdkhdz 位于节点实例库，最终被 C++ 导出流程读取生成新意文件。</p>
+
+<h3>3.1 核心查询 SQL（selectGdkhdzEntity）</h3>
+<pre><code>select rownum as rn,
+       t.market                    jypz,   -- 交易品种（先取市场代码，后按配置转换）
+       ' '                         jgdm,   -- 机构代码：固定空格
+       nvl(nf.orgid, t.orgid)      yybdm,  -- 营业部编码：资金账户orgid优先，缺省取股东表orgid
+       (zdxwType='1' ? t.mainseat : t.trdseat) zdxw, -- 席位：参数67057，0交易席位/1托管席位
+       t.secuid                    gdzh,   -- 股东账户
+       t.fundacct                  zjzh,   -- 券商资金账户
+       ' '                         cgfs,   -- 存管标志（占位，后续转换）
+       t.status                    zhzt,   -- 客户状态（后续按配置转换）
+       nvl(b.bankcode, ' ')        yhdm,   -- 银行代码（后续转换）
+       t.open_date                 jyzh,   -- 交易账号：借用存放开户日期（后续清空）
+       t.ext_cls                   extCls, -- 外部类别：区分H股股东
+       nf.curcode                  curcode -- 币种（H股拆分/交易品种特判用）
+from node_secuid t
+  left join (select * from node_fundacct_bank nb
+             where nb.status in ('0','1','4')) b
+    on (t.fundacct = b.fundacct
+        and (case when t.market='2' then '1'   -- 深B → 港币
+                  when t.market='3' then '2'   -- 沪B → 美元
+                  else '0' end) = b.curcode)
+  left join node_fundacct nf on t.fundacct = nf.fundacct
+where t.status != '9'                          -- 排除销户状态
+  and t.open_date &lt;= #{busidate}              -- 已开户
+  and t.secuid between #{startSecuid} and #{endSecuid} -- 按股东代码区间分批</code></pre>
+</div>
+
+<h2>四、逐字段赋值逻辑</h2>
+
+<div class="card">
+<p>目标表 <code>node_gdkhdz</code> 共 11 列，联合主键为 <code>(jgdm, yybdm, jypz, zdxw, gdzh, zjzh)</code>。下表给出每个字段的完整赋值链（SQL 取值 → Java 转换 → 最终写入值）。</p>
+
+<table class="field-table">
+  <tr>
+    <th style="width:110px">目标字段</th>
+    <th style="width:130px">主键</th>
+    <th style="width:240px">初始来源（SQL）</th>
+    <th>转换 / 赋值逻辑（Java）</th>
+  </tr>
+  <tr>
+    <td><b>jgdm</b><br/>机构代码</td><td>✅</td>
+    <td>固定字符串 <code>' '</code>（空格）</td>
+    <td>无转换，始终保持单空格。</td>
+  </tr>
+  <tr>
+    <td><b>yybdm</b><br/>柜台营业部编码</td><td>✅</td>
+    <td><code>nvl(nf.orgid, t.orgid)</code><br/>资金账户 orgid 优先，缺省取股东账户 orgid</td>
+    <td>
+      <b>①</b> null → 置 <code>' '</code>（保证主键非空）；<br/>
+      <b>②</b> 若配置表存在 <code>('yybdm','@',' ',' ','@')</code>（营业部 '@' 转 '@'），保留原值不补零；<br/>
+      <b>③</b> 否则 <code>StringUtils.leftPad(yybdm, 4, '0')</code> 左补零至 4 位（如 "98" → "0098"）。
+    </td>
+  </tr>
+  <tr>
+    <td><b>jypz</b><br/>交易品种</td><td>✅</td>
+    <td><code>t.market</code>（市场代码：0深A/1沪A/2深B/3沪B/6股转A/7股转B/B京A/5沪港通…）</td>
+    <td>
+      <b>①</b> <code>mapJypz</code> 按键 <code>srcfield1+srcfield2+srcfield3</code>（trim）精确匹配当前市场 → 命中则取 <code>tgtfield</code>（如 <code>('jypz','0',' ',' ','SAGF')</code> 深A→SAGF；<code>('jypz','1',' ',' ','HAGF')</code> 沪A→HAGF）；<br/>
+      <b>②</b> 未命中 → 查找 <code>('jypz','default',...)</code> 兜底配置；<br/>
+      <b>③</b> 仍未命中 → 默认 <code>"KFJJ"</code>（开放式基金）；<br/>
+      <b>④</b> H股特判（深B market=2 且 ext_cls=H）：币种=1（港币）→ <code>"HCHK"</code>；币种=0（人民币）→ <code>"HCGF"</code>。
+    </td>
+  </tr>
+  <tr>
+    <td><b>zdxw</b><br/>席位代码</td><td>✅</td>
+    <td>系统参数 67057 控制：<br/><code>'1'</code> → <code>t.mainseat</code>（托管席位）<br/><code>'0'</code>（默认）→ <code>t.trdseat</code>（交易席位）</td>
+    <td>null → 置 <code>' '</code>；其余无转换。</td>
+  </tr>
+  <tr>
+    <td><b>gdzh</b><br/>股东账户</td><td>✅</td>
+    <td><code>t.secuid</code></td>
+    <td>无转换。</td>
+  </tr>
+  <tr>
+    <td><b>zjzh</b><br/>券商资金账户</td><td>✅</td>
+    <td><code>t.fundacct</code></td>
+    <td>无转换。</td>
+  </tr>
+  <tr>
+    <td><b>cgfs</b><br/>存管方式</td><td></td>
+    <td>固定占位 <code>' '</code></td>
+    <td>由 <code>BankCodeCustodyHelper</code> 决定（<b>见 4.1 银行/存管转换</b>）：<br/>
+      有有效银行配置 → <code>'2'</code>（三方存管）；<br/>
+      无配置 → <code>'0'</code>（非三方存管），且若配置 <code>('cgfs','0',' ',' ',' ')</code>（tgt 为空格）则<b>整条记录过滤</b>。
+    </td>
+  </tr>
+  <tr>
+    <td><b>yhdm</b><br/>存管银行</td><td></td>
+    <td><code>nvl(b.bankcode, ' ')</code><br/>按 (资金账号, 市场对应币种) 匹配 <code>node_fundacct_bank</code>（取状态 0正常/1预解/4预签 的银行记录），无记录时为空格</td>
+    <td>
+      <b>①</b> 另库虚拟银行（FS-CBS-19476）：若 <code>yybdm</code> 属于休眠户/不合格户营业部（参数 67078/67079 配置），银行代码替换为参数 67077 指定的<b>另库虚拟银行</b>；<br/>
+      <b>②</b> <code>BankCodeCustodyHelper</code> 按配置 <code>mapYhdm</code> 转换（<b>见 4.1</b>）；<br/>
+      未命中任何配置：银行代码原非空 → <code>'9999'</code>；原为空 → <code>' '</code>。
+    </td>
+  </tr>
+  <tr>
+    <td><b>zhzt</b><br/>账号状态</td><td></td>
+    <td><code>t.status</code>（股东状态，字典 610085）</td>
+    <td>
+      <code>mapZhzt</code>（xyfield=<code>gdkhzt</code>）按 srcfield1 匹配转换；<br/>
+      <b>①</b> 当天开户特判：<code>jyzh（open_date）== busidate</code> → 取 <code>('gdkhzt','today_open',...) → 2（新开户）</code>；<br/>
+      <b>②</b> 否则按状态匹配：0→1（正常）、3→3（销户）、F→4（锁定）；<br/>
+      <b>③</b> 未匹配 → 取 <code>('gdkhzt','default',...) → 8（异常）</code>。
+    </td>
+  </tr>
+  <tr>
+    <td><b>jyzh</b><br/>交易账号</td><td></td>
+    <td><code>t.open_date</code>（开户日期，仅作中间载体：当天开户状态判断）</td>
+    <td>状态判断完成后<b>强制置 <code>' '</code></b>（单空格），新意格式交易账号留空。</td>
+  </tr>
+  <tr>
+    <td><b>updatetime</b><br/>更新时间</td><td></td>
+    <td>—</td>
+    <td>Java 取当前时间，格式 <code>yyyy-MM-dd HH:mm:ss</code>，同一实例所有记录相同。</td>
+  </tr>
+</table>
+
+<h3>4.1 银行代码与存管方式转换（BankCodeCustodyHelper）</h3>
+<p>这是 yhdm / cgfs 两个字段最核心的转换逻辑，按市场先推导币种，再分三个分支处理：</p>
+<div class="mermaid">
+flowchart TD
+    A["输入: yhdm 当前值 / market / yybdm / 各映射"] --> B["curcode = 市场 → 币种<br/>沪B(3)/股转B(7) → USD<br/>深B(2) → HKD<br/>其他 → RMB"]
+    B --> C{"mapYhdm 命中<br/>key = yhdm + 空格"}
+    C -- 命中 --> D["yhdm = 配置 tgtfield"]
+    D --> E{"defaultYhdm 非空 且<br/>深B|沪B|股转B?"}
+    E -- 是 --> F["yhdm = defaultYhdm<br/>(参数62915 默认外币存管银行)"]
+    E -- 否 --> G
+    F --> G{"bgwbYhdmMode=Y 且<br/>深B|沪B?"}
+    G -- 是 --> H{"营业部编码数值"}
+    H -- "yybdm &lt; 100" --> I{"当前 yhdm = 0200?"}
+    H -- "yybdm &gt;= 100" --> J["yhdm = 0200"]
+    H -- 非数字 --> K["yhdm = 1800 兜底"]
+    I -- 是 --> L["yhdm = 0200"]
+    I -- 否 --> M["yhdm = 1800"]
+    J --> N["cgfs = 2 三方存管"]
+    K --> N
+    L --> N
+    M --> N
+    G -- 否 --> N
+    C -- 未命中 --> O{"mapYhdm 命中<br/>key = 空格 + curcode<br/>(按市场默认币种)"}
+    O -- 命中 --> P["yhdm = 配置 tgtfield<br/>cgfs = 2"]
+    O -- 未命中 --> Q{"yhdm 原值非空?"}
+    Q -- 是 --> R["yhdm = 9999"]
+    Q -- 否 --> S["yhdm = 空格"]
+    R --> T["cgfs = 0"]
+    S --> T
+    T --> U{"配置 cgfs='0'<br/>tgtfield = 空格"}
+    U -- 是 --> V["!返回 false<br/>整条记录被过滤"]
+    U -- 否 --> W["返回 true 保留"]
+</div>
+<p class="small">图 4：yhdm/cgfs 转换决策树。过滤语义：非三方存管且配置允许过滤时，该股东记录不参与新意对照导出。</p>
+
+<h3>4.2 H股多币种拆分（processNodeGdkhdzs）</h3>
+<div class="card">
+<ul>
+  <li><b>触发条件</b>：市场=深B（'2'）且 <code>ext_cls = 'H'</code>（H股全流通账户，字典 613008）且币种 <code>curcode</code> 含逗号（多币种）。</li>
+  <li><b>规则</b>：按逗号拆分币种，为<b>每一个币种复制生成一条新记录</b>（其余字段完全相同，仅 curcode 不同），并删除原多币种记录。</li>
+  <li><b>目的</b>：同一 H 股股东账户可能同时对应人民币/港币多条银行关系，拆分后每个币种对应一条对照记录；配合后续交易品种特判（HCHK/HCGF），保证新意文件每个币种一行。</li>
+  <li>币种为空时跳过（记录日志），不产生数据。</li>
+</ul>
+</div>
+
+<h3>4.3 去重规则</h3>
+<div class="card">
+<p>转换完成后按<b>联合主键 6 字段</b> <code>(jgdm, yybdm, jypz, zdxw, gdzh, zjzh)</code> 做 <code>Collectors.toMap</code> 去重，<b>保留先出现的记录，丢弃后出现的重复记录</b>（merge 函数保留 existing）。</p>
+<div class="warn">⚠️ 需求背景（FS-CBS-13424）：股转/京A 与沪A 等市场可共用同一资金账户，若出现主键完全相同的记录，改用 <code>batchInsert</code> 直接插入会导致主键冲突，因此在落库前先按主键去重。</div>
+</div>
+
+</div>
+
+<h2>五、转换配置表依赖（comm_xyexport_mapped）</h2>
+
+<div class="card">
+<p>配置表 <code>comm_xyexport_mapped</code>（新意转换配置表，位于默认数据源）定义源值 → 新意值的映射。按 <code>xyfield</code> 字段分类加载为五个内存 Map：</p>
+
+<table>
+  <tr><th>xyfield 值</th><th>Map key 构成</th><th>用途</th><th>典型配置示例</th></tr>
+  <tr>
+    <td><code>yhdm</code></td>
+    <td><code>srcfield1 + srcfield2</code></td>
+    <td>银行代码 → 新意银行代码；按市场默认币种取默认银行</td>
+    <td><code>('yhdm','0200',' ',' ','0200')</code>：银行 0200 → 新意 0200<br/><code>('yhdm','10',' ',' ','1500')</code>：银行 10 → 1500<br/><code>('yhdm',' ',' ',' ','0200')</code>：空银行 → 默认 0200</td>
+  </tr>
+  <tr>
+    <td><code>jypz</code></td>
+    <td><code>srcfield1+srcfield2+srcfield3</code>（trim 拼接）</td>
+    <td>市场 → 交易品种（主配置）；<code>default</code> 为兜底</td>
+    <td><code>('jypz','0',' ',' ','SAGF')</code>：深A → SAGF<br/><code>('jypz','1',' ',' ','HAGF')</code>：沪A → HAGF<br/><code>('jypz','default',' ',' ','KFJJ')</code>：兜底 KFJJ</td>
+  </tr>
+  <tr>
+    <td><code>gdkhzt</code></td>
+    <td><code>srcfield1</code></td>
+    <td>客户状态转换；<code>today_open</code> 当天开户、<code>default</code> 兜底</td>
+    <td><code>('gdkhzt','0',' ',' ','1')</code>：正常 → 1<br/><code>('gdkhzt','F',' ',' ','4')</code>：锁定 → 4<br/><code>('gdkhzt','today_open',' ',' ','2')</code>：新开户<br/><code>('gdkhzt','default',' ',' ','8')</code>：异常兜底</td>
+  </tr>
+  <tr>
+    <td><code>yybdm</code></td>
+    <td><code>srcfield1</code></td>
+    <td>营业部编码特殊处理：<code>'@'→'@'</code> 表示不左补零</td>
+    <td><code>('yybdm','@',' ',' ','@')</code></td>
+  </tr>
+  <tr>
+    <td><code>cgfs</code></td>
+    <td><code>srcfield1</code></td>
+    <td>存管方式过滤：tgtfield 为空格 → 过滤非三方存管记录</td>
+    <td><code>('cgfs','0',' ',' ',' ')</code>：存管方式 0 → 过滤</td>
+  </tr>
+</table>
+
+<h3>5.1 系统参数依赖</h3>
+<table>
+  <tr><th>参数 ID</th><th>常量名</th><th>含义与用途</th></tr>
+  <tr><td>62915</td><td><code>GDKHDZ_YHDM_DEFAULT</code></td><td>深B/沪B 默认外币存管银行（如中金默认 1800）。B 股银行配置命中后覆盖为默认行。</td></tr>
+  <tr><td>67036</td><td><code>BGWB_DEFAULT_YHDM_MODE</code></td><td>B股外币默认银行代码模式：<code>Y</code> 时按营业部代码数值重写银行代码（&lt;100 → 0200/1800；≥100 → 0200）。</td></tr>
+  <tr><td>67057</td><td><code>GDKHDZ_ZDXW_TYPE</code></td><td>席位类型：<code>0</code> 交易席位（取 trdseat，默认）；<code>1</code> 托管席位（取 mainseat）。</td></tr>
+  <tr><td>67077</td><td><code>OTHER_VIRTUAL_BANK</code></td><td>另库虚拟银行：休眠户/不合格户营业部的银行代码统一显示为该虚拟银行。</td></tr>
+  <tr><td>67078</td><td><code>SLEEP_OTHER_ORG</code></td><td>休眠户另库营业部（逗号分隔多个 orgid）。</td></tr>
+  <tr><td>67079</td><td><code>UNQUALIFIED_OTHER_ORG</code></td><td>不合格户另库营业部（逗号分隔多个 orgid）。</td></tr>
+</table>
+<div class="warn">⚠️ FS-CBS-19476 需求背景：不合格/休眠用户在红利红股结息场景未激活时，分支机构和银行代码应显示为休眠机构/休眠银行（即参数 67077-67079 配置），不再显示原分支机构和银行代码。</div>
+</div>
+
+<h2>六、并发处理模型</h2>
+
+<div class="card">
+<div class="mermaid">
+flowchart TD
+    subgraph POOL1["线程池1（生成）：n = threadNum/2（至少2）"]
+        G1["任务: createGdkhdz(实例, 映射..., 起止secuid)"]
+        G2["按 secuid 排序数组分片<br/>perProcsize 默认100000"]
+    end
+    subgraph POOL2["线程池2（落库）：n = threadNum/2"]
+        S1["任务: SaveGdkhdz(实例, List)"]
+        S2["Lists.partition 每批 1 万条"]
+        S3["内部再开线程池<br/>batchInsert 并发插入"]
+    end
+    N["节点实例循环（串行）"] --> TR["truncate node_gdkhdz"]
+    TR --> POOL1
+    POOL1 --> F["Future 收集结果"]
+    F --> POOL2
+    POOL2 --> W["等待保存完成"]
+</div>
+<ul>
+  <li><b>实例级</b>：按结算主体的计算节点实例<b>串行</b>处理；每个实例先 <code>truncate</code> 清空再生成。</li>
+  <li><b>批次级</b>：全量股东代码排序后按 <code>perProcsize</code>（参数，默认 100000，手动入口固定 100000）切分区间，提交线程池并发生成。</li>
+  <li><b>生成线程数</b>：<code>threadNum</code> 参数 ÷ 2（下限 2）。</li>
+  <li><b>落库</b>：每个实例返回的列表按 1 万条一批 <code>partition</code>，每批再开一个线程（线程数 = 批数）执行 <code>batchInsert</code>。</li>
+  <li><b>排他性</b>：手动重新生成前必须校验<b>无正在运行的清算流程</b>（<code>RegenerateCheck.checkExistsRunningFlow</code>），避免 truncate 正在被清算读取的数据。</li>
+  <li><b>失败处理</b>：任何一步异常 → 标记失败，最终抛 <code>BASEERR_CODE_103018486</code>（"生成股东客户对照失败，详情查看日志"）。</li>
+</ul>
+</div>
+
+<h2>七、需求演进记录（代码注释索引）</h2>
+
+<div class="card">
+<table>
+  <tr><th>需求/缺陷号</th><th>内容</th><th>实现位置</th></tr>
+  <tr>
+    <td>FS-CBS-19476<br/>（zhongbin）</td>
+    <td>【ID1363057】不合格/休眠用户未激活，存在红利红股结息时，分支机构和银行代码应显示为休眠机构和休眠银行，而不是原分支机构/银行代码。</td>
+    <td>Handler L146-161：参数 67077-67079 构建 <code>mapOtherOrgBankcode</code>；Task L98-102：yybdm 命中后覆盖 yhdm。</td>
+  </tr>
+  <tr>
+    <td>FS-CBS-13424<br/>（shiqingye）</td>
+    <td>同时存在股转、京A 账户且共用同一资金账户时，merge 方式影响性能；改用 batchInsert 会主键冲突 → 改为按主键 toMap 去重 + batchInsert。</td>
+    <td>Task L176-183 去重；L256-259 批量插入。</td>
+  </tr>
+  <tr>
+    <td>BUG-11061<br/>（shiqingye）</td>
+    <td>新意配置与客户数据关联不上，数据转换结果为空导致异常 → 增加判空处理。</td>
+    <td>Handler L245-249：空列表跳过。</td>
+  </tr>
+  <tr>
+    <td>多币种 H 股拆分<br/>（H股全流通）</td>
+    <td>深B H股全流通账户按币种拆分多条记录，交易品种按币种转 HCHK（港币）/HCGF（人民币）。</td>
+    <td>Task processNodeGdkhdzs；jypz 特判 L138-144。</td>
+  </tr>
+</table>
+</div>
+
+<h2>八、涉及文件清单</h2>
+
+<div class="card">
+<table>
+  <tr><th>文件</th><th>作用</th></tr>
+  <tr><td><code>report/.../handler/GdkhdzHandler.java</code></td><td>主控 Handler：参数解析、配置加载、清表、分片调度、失败汇总；手动重新生成入口 nodeGdkhdzGenerate。</td></tr>
+  <tr><td><code>report/.../handler/GdkhdzTask.java</code></td><td>生成任务：核心 SQL 调用、多币种拆分、逐条转换、主键去重；保存任务：分批并发 batchInsert。</td></tr>
+  <tr><td><code>cbs-data-cbs/.../util/BankCodeCustodyHelper.java</code></td><td>银行代码/存管方式转换工具（yhdm/cgfs 赋值与记录过滤）。</td></tr>
+  <tr><td><code>common/dao/NodeGdkhdzBizDao.java</code> + <code>NodeGdkhdzBizDao.xml</code></td><td>自定义查询：selectGdkhdzEntity（三表关联）、deleteAllGdkhdz（truncate）、distinctNodeSecuid、selectPage（查询页）。</td></tr>
+  <tr><td><code>common/dao/base/NodeGdkhdzBaseDao.xml</code></td><td>基础 CRUD + batchInsert/batchUpdate/batchMergeinto。</td></tr>
+  <tr><td><code>common/model/NodeGdkhdz.java</code> / <code>NodeGdkhdzResVo.java</code></td><td>表模型（11 列）；查询 VO（+curcode、extCls）。</td></tr>
+  <tr><td><code>common/model/CommXyexportMapped.java</code></td><td>新意转换配置表模型（xyfield/srcfield1~3/tgtfield）。</td></tr>
+  <tr><td><code>report/.../handler/NodeGdkhdzMacbsHandler.java</code></td><td>股东客户对照查询页接口（/nodeGdkhdzQueryPage）。</td></tr>
+  <tr><td><code>resources/bex/NodeGdkhMapped-bex.xml</code></td><td>BEX 注册：createGdkhdz（清算流程触发）/ nodeGdkhdzGenerate（手动入口）。</td></tr>
+  <tr><td><code>database/script/.../fs_cbs_node/1.table/node_gdkhdz.sql</code></td><td>目标表 DDL（主键 6 字段）。</td></tr>
+  <tr><td><code>database/script/.../fs_cbs_comm/2.data/comm_xyexport_mapped.sql</code></td><td>新意转换配置初始化数据（yhdm/jypz/gdkhzt/yybdm/cgfs 等）。</td></tr>
+  <tr><td><code>macbs-web/.../NodeGdkhdz.json</code> / <code>base_api.sql</code></td><td>前端页面"重新生成"按钮与后端 API 注册（607040100/607040130）。</td></tr>
+</table>
+</div>
+
+<footer>
+  本文档基于 GdkhdzHandler.java / GdkhdzTask.java / NodeGdkhdzBizDao.xml / BankCodeCustodyHelper.java 及数据库脚本源码分析生成 · 生成日期 2026-08-21
+</footer>
+
+</div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { curve: 'basis', nodeSpacing: 40, rankSpacing: 50 } });
+</script>
+</body>
+</html>
