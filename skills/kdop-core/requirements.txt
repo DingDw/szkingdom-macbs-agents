@@ -1,0 +1,4 @@
+playwright>=1.40
+# 可选：登录页出现图形验证码时需要
+# pytesseract>=0.3.10
+# pillow>=10.0

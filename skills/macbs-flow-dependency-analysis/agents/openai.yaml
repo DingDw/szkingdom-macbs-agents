@@ -1,0 +1,4 @@
+interface:
+  display_name: "MACBS流程任务依赖分析"
+  short_description: "查询指定流程或步骤的任务前后置依赖，支持数据库直连和CSV回传，输出Mermaid图"
+  default_prompt: "使用 $macbs-flow-dependency-analysis 分析 flowchartid=25 的任务前后置依赖关系并输出 Mermaid 图。"

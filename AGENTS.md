@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## 优先信息源
+## 全局优先信息源
 
 - 项目分为日终清算和日间清算两个大的业务模块组成。
 - 代码阅读/代码分析/二次开发时，优先只考虑日终清算，除非用户指定了与日间清算的交互
@@ -34,9 +34,34 @@
 - 新增功能必须遵守清算七阶段模型
 - 新增功能需要先确认实现模式：单一功能号/三段式处理
 - **MUST**：关键代码(方法声明定义/条件分支/关键业务逻辑等)必须有含义明确的业务逻辑说明注释
+- 三段式功能号中，Restore和CalcRange方法，**只**使用MemdbManager，**不要**使用CacheManager.
 - 新增功能如果用户没有明确指出可以直接使用`MemdbManager`，必须使用`CacheManager`作为内存数据库访问层，先在`Cache`阶段缓存数据。
 - 拥有业务含义的字符/字符串，不允许出现类似'0', "AAA"等魔法数常量，要使用含义明确的宏定义替代；对于int/long/double等数值类型，尤其是0，不需要过度定义常量。
 - 如果确定在整个功能号执行阶段，某个表**都是**只读状态，**没有任何**Insert/Delete/Update操作，则优先使用表对应的`CacheManagerPtr`类
+
+### 代码命名规范
+- 宏定义：下划线分割的全大写
+- 类/struct/函数：大写字母开头的CamelCase格式。类名/struct名，必须以C开头。
+- 局部变量/函数参数：类型前缀+CamelCase格式
+- 成员变量：m_类型前缀+CamelCase格式
+- 变量类型前缀说明：
+    - 函数： fn
+    - bool: b
+    - char: c
+    - int/size_t: n
+    - double/float: db
+    - char[], char*: sz
+    - string: str
+    - map/unordered_map: map
+    - set/unordered_set: set
+    - list: lst
+    - vector: vec
+    - deque: deq
+    - 指针: p
+    - 自定义类/struct：obj
+    - 项目内定义的特殊类型：
+       - TXXX_index: idx
+       - CMacbsResultSet: rs
 
 ### 格式化与提交前检查
 
@@ -74,20 +99,26 @@
 ### database修改约束
 
 - 优先选择最窄影响面：客户个性化目录 > 指定数据库类型目录 > `common` 通用目录；客户目录已有同名脚本时必须同时确认通用脚本是否也需要修复。
-- DDL 类变更优先同步 `pdma/split_pdm/MACBS-V3/` 对应模型 JSON，再同步生成或维护 `script/full/`、`script/patch/` 中对应 `1.table` 脚本，避免模型和交付 SQL 漂移。
-- DML 或初始化数据变更放 `2.data`；表结构、索引、分区、序列等对象变更放 `1.table`；流程相关配置保持在现有 `flow/` 分组下。
+- DDL 类变更，默认**不要**调整`pdma/split_pdm/MACBS-V3/` 对应模型 JSON，由用户手工调整，并**需要**用户确认是否已经完成调整。再同步生成或维护 `script/patch/` 中对应 `1.table` 脚本，避免模型和交付 SQL 漂移。
+- DDL类变更，修改`1.table`脚本时，应当保证每张表对应一个以表名为文件名的sql脚本
+- DML 或初始化数据变更放 `2.data`；流程相关配置保持在现有 `2.data/flow/` 分组下；`/业务定义/科目定义/记账规则`参考现有的目录结构存放；`文件接口`类变更放在`file`目录下；其他内容放在`2.data`下，以修改数据的表的表名作为sql脚本文件名。
+- 生成或者更新sql脚本时，注释中需要标注**需求编号(格式为:FS-CBS-XXX)**，没有时需要用户确认，如果用户确认没有对应需求编号，注释标注FIXME
 - 日终与日间脚本不要混放：日终使用 `fs_cbs`，日间使用 `fs_cbs_day`；日间独立部署涉及 `fs_cbs_day` 库，融合部署通常仍要检查 `fs_cbs_comm`、`fs_cbs_node`、`fs_cbs_nodex`。
 - 多节点库脚本要按现有 `fs_cbs_node1.sh`、`fs_cbs_node2.sh`、`fs_cbs_node3.sh` 和 `fs_cbs_nodex.sh` 约定维护，不要把节点专属对象误放到 `fs_cbs_comm`。
-- 修改安装入口时同步检查同目录 `db_config.ini`、对应 `.sh` 安装脚本和脚本子目录是否一致；不要只新增 SQL 文件而遗漏入口脚本。
+<!-- - 修改安装入口时同步检查同目录 `db_config.ini`、对应 `.sh` 安装脚本和脚本子目录是否一致；不要只新增 SQL 文件而遗漏入口脚本。 -->
 - 关键数据订正、流程配置、菜单权限、字典参数等脚本必须写清业务含义注释；涉及客户定制时注释中标明客户和触发背景。
 - 修改数据库脚本时，只需要修改`patch`目录下的增量脚本，不要 修改全量脚本
-- 修改表结构时，需要同步调整 对应的`his_${table_name}`的历史表结构 /  归档 / 迁移配置
+- 修改表结构时，需要向用户确认是否需要**日切删除**以及**归档**，如果需要**归档**， 需要同步调整 对应的`his_${table_name}`的历史表结构。如果需要**日切删除**或者**归档**，需要用户提供明确的删除和归档条件，并生成归档配置。
 
-### database验证与清理
+<!-- ### database验证与清理
 
 - 默认不直接执行数据库脚本；需要验证时先说明目标数据库类型、库名、脚本路径和执行顺序。
 - 仅清理增量 SQL 时使用 `macbs-service/database/script/clean_patch_sql.bat` 或 `clean_patch_sql.sh`，它只处理 `script/patch` 下的 `.sql` 和空目录；不要用手写递归删除替代。
-- 交付前至少检查新增 SQL 所在路径是否匹配数据库类型和清算场景，并用 `rg` 查同名表、同名字典、同名流程配置在 `full/`、`patch/`、客户目录中的已有定义。
+- 交付前至少检查新增 SQL 所在路径是否匹配数据库类型和清算场景，并用 `rg` 查同名表、同名字典、同名流程配置在 `full/`、`patch/`、客户目录中的已有定义。 -->
+
+## macbs-base/macbs-service公用改动规范
+
+- 涉及的改动内容，分析和确认是否修复存量数据库数据，如果需要修复，则需要提供工程脚本，工程脚本不提供sh，只在 `macbs-service/database/script/patch/gauss/工程脚本` 下提供sql脚本。
 
 ## MCP规则
 

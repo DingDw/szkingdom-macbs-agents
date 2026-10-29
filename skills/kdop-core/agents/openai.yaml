@@ -1,0 +1,4 @@
+interface:
+  display_name: "KDOP Core"
+  short_description: "Generic KDOP client with requirement-to-commit traceability"
+  default_prompt: "Use $kdop-core to list the requirements of a KDOP version, or to list the commits related to a KDOP requirement number."
